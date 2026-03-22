@@ -1,11 +1,47 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MultiPass — South Portland Metro APA</title>
+  <!--
+  ============================================================================
+  MultiPass - Index.html (Standalone / GitHub Pages version)
+  ============================================================================
 
-  <!-- Open Graph tags for Facebook link previews -->
+  PURPOSE:
+    Single-file frontend for the MultiPass web app - self-service singles
+    qualifier registration for APA players. Contains ALL CSS, HTML, and JS.
+
+    This is a STANDALONE build that does NOT depend on Google Apps Script.
+    callServer() uses fetch() against a Cloudflare Worker proxy instead of
+    google.script.run.
+
+  PRODUCT NAME:
+    "MultiPass" is a PLACEHOLDER name. Change APP_NAME in <script> and
+    Code.js APP_NAME together. All UI reads from the JS constant.
+
+  BRANDING:
+    APA family app — header pixel-matched to PatchCheck/SharpShooters,
+    body uses 36px base for content density (see Base font comment below):
+      - 36px base font, header explicit px matching PatchCheck's 47px renders
+      - .page wrapper: 100vw, 16px padding
+      - :root variables identical across all apps
+      - Header: gradient, 22px radius, subtitle italic, beta pill full-width
+      - Cards: 22px radius, 20px padding, 1px border, 0 3px 10px shadow
+      - Buttons: 999px radius, gradient background, 900 weight
+      - Member pill: gradient, 999px radius, 1.05rem, centered
+
+  ARCHITECTURE:
+    Standard APA app family pattern:
+      - callServer() Promise wrapper via fetch to Cloudflare Worker
+      - esc() XSS helper
+      - showConfirmModal() for cancel confirmation
+      - showInfoModal() for success/cancel notifications
+    NOTE: Admin dashboard code has been moved to Admin.html.
+    This file contains ZERO admin code. doGet() routes admin
+    requests to Admin.html; regular users get this file.
+
+  ============================================================================
+  -->
+  <title>MultiPass — South Portland Metro APA</title>
   <meta property="og:title" content="MultiPass — Singles Qualifier Registration">
   <meta property="og:description" content="Register for South Portland Metro APA singles qualifiers. Check eligibility, sign up for events, and manage your registrations.">
   <meta property="og:type" content="website">
@@ -14,140 +50,2832 @@
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:site_name" content="South Portland Metro APA">
-
-  <!-- Twitter/X card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="MultiPass — Singles Qualifier Registration">
   <meta name="twitter:description" content="Register for SPM-APA singles qualifiers. Check eligibility and sign up in seconds.">
   <meta name="twitter:image" content="https://southportlandmetroapa.github.io/multipass/og-image.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    /* ======================================================================
+       CSS - Branding & Layout
+       ======================================================================
+       Base font is 36px (CalendarViewer density). Header uses EXPLICIT PX
+       values matching PatchCheck's 47px-based renders. Body rem values are
+       calibrated to 36px. Do NOT change without cross-referencing siblings.
+       ====================================================================== */
 
-    html, body {
-      width: 100%; height: 100%;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0a0a0a;
-      color: #fff;
+    :root {
+      /* -- APA branding colors --
+         Identical across PatchCheck, SharpShooters, CrewFinder, MultiPass. */
+      --spm-primary: #ea002a;
+      --spm-accent: #0031a1;
+
+      /* -- Neutral palette --
+         IMPORTANT: --muted is #888 (not #666). Matches PatchCheck/SharpShooters. */
+      --bg: #f5f5f5;
+      --card: #ffffff;
+      --border: #e1e1e1;
+      --text: #1f1f1f;
+      --muted: #888;
+
+      /* -- Registration state colors (MultiPass-specific) -- */
+      --registered-bg: #f0faf3;
+      --registered-border: #28a745;
+      --registered-btn: #28a745;
+
+      /* -- Warning/ineligible colors -- */
+      --warning-bg: #fff3cd;
+      --warning-border: #ffc107;
+      --warning-text: #856404;
     }
 
+    /* -- Reset ------------------------------------------------------------ */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* -- Base font --------------------------------------------------------
+       36px base — matches CalendarViewer. MultiPass is a content-dense
+       registration app (6 fields per card × 4-6 cards). At 47px
+       (PatchCheck/SharpShooters standard), one qualifier card consumed
+       2+ full mobile screens. At 36px, cards are readable and users can
+       see 1-2 full cards per screen — matching CalendarViewer's density.
+
+       The header uses EXPLICIT px values (not rem) to preserve the same
+       visual impact as PatchCheck's 47px-based header. This gives us:
+         - Header: big, bold, branded (same as PatchCheck/SharpShooters)
+         - Body content: readable, scrollable, mobile-friendly
+
+       HISTORY: Started at 47px to match PatchCheck. User tested on mobile
+       and said "so hard to read" and "not mobile friendly." Side-by-side
+       comparison with CalendarViewer (36px) confirmed the density problem.
+       PatchCheck works at 47px because it shows fewer, simpler data
+       points (stats + SP buttons). MultiPass needs CalendarViewer density.
+
+       All rem values below are calibrated to 36px.
+       1rem = 36px. 0.5rem = 18px. Etc. */
+    html, body {
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 36px;
+    }
+
+    /* -- Page wrapper -----------------------------------------------------
+       100vw width + 16px padding = CalendarViewer standard. PatchCheck uses
+       6px but MultiPass needs more breathing room at 36px base (same reason
+       CalendarViewer chose 16px). */
     .page {
-      min-height: 100vh;
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      padding: 40px 20px;
+      width: 100vw;
+      padding: 16px;
+    }
+
+
+    /* -- Header -----------------------------------------------------------
+       Gradient card with org name, app name (italic), and beta pill.
+       padding: 22px 20px 20px = PatchCheck standard. */
+    header {
+      border-radius: 22px;
+      padding: 22px 20px 20px;
+      color: #fff;
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+      text-align: center;
+      margin-bottom: 18px;
+    }
+
+    /* -- Title: "South Portland Metro APA" --
+       EXPLICIT PX to match PatchCheck's rendered size exactly.
+       PatchCheck: 1.5rem × 47px = 70.5px → using 70px.
+       (Was 54px which matched CalendarViewer but looked undersized
+       next to PatchCheck on the user's phone.) */
+    .title {
+      font-size: 70px;
+      font-weight: 900;
+      line-height: 1.08;
+    }
+
+    /* -- Subtitle group: app name inline-block --
+       margin-top: 10px = PatchCheck. */
+    .subtitle-group {
+      display: inline-block;
+      margin-top: 10px;
+    }
+
+    /* -- Subtitle: app name --
+       EXPLICIT PX to match PatchCheck's rendered size exactly.
+       PatchCheck: 1.68rem × 47px = 78.96px → using 79px.
+       (Was 43px which matched CalendarViewer but looked undersized.) */
+    .subtitle {
+      font-size: 79px;
+      font-weight: 400;
+      font-style: italic;
+      opacity: 0.95;
+    }
+
+    /* -- Header pill: "Singles Qualifier Registration" --
+       Full-width block below subtitle. Styled to match the desktop pill
+       appearance — thick border, generous padding, strong background —
+       just at mobile scale. The pill is a key branding/context element
+       that tells users what this app does.
+       PatchCheck reference: 1.21rem × 47 = 56.87px (MEMORY.md note). */
+    .beta-pill {
+      display: block;
+      width: 100%;
+      margin-top: 8px;
+      padding: 10px 20px;
+      border-radius: 999px;
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.25);
+      color: #fff;
+      border: 2px solid rgba(255, 255, 255, 0.7);
+      box-sizing: border-box;
+    }
+
+    /* -- Header status text --
+       PatchCheck: 1.4rem × 47px = 65.8px → using 54px as a middle
+       ground that reads well without competing with the title/subtitle.
+       (Was 41px, felt small relative to the now-larger title.) */
+    .header-status {
+      margin: 10px 0 0;
+      font-size: 54px;
+      opacity: 0.9;
+    }
+
+    /* -- Messages ---------------------------------------------------------
+       Error and info cards. Recalibrated for 36px base.
+       Was 1.4rem × 47px = 65.8px. Now 1.15rem × 36px = 41.4px. */
+    .msg {
+      width: 100%;
+      border-radius: 22px;
+      padding: 18px 20px;
+      margin-bottom: 18px;
+      font-size: 1.15rem;
+      line-height: 1.4;
+    }
+
+    .msg-error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .msg-info {
+      background: #e8f0fe;
+      color: #1a3b6b;
+    }
+
+    /* -- Success message (green, for registration/cancel confirmation) -- */
+    .msg-success {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    /* -- Search card ------------------------------------------------------
+       padding: 20px, margin-bottom: 18px = PatchCheck exact. */
+    .search-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 20px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+      margin-bottom: 18px;
+    }
+
+    /* -- Search input --
+       Recalibrated for 36px base. Was 1.68rem × 47 = 79px.
+       Now 1.35rem × 36 = 48.6px — matches CalendarViewer .time sizing. */
+    .search-input {
+      width: 100%;
+      padding: 16px 18px;
+      font-size: 1.35rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      font-family: inherit;
+      text-align: center;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .search-input:focus {
+      border-color: var(--spm-accent);
+      box-shadow: 0 0 0 3px rgba(0, 49, 161, 0.15);
+    }
+
+    /* -- Search button --
+       Recalibrated for 36px base. Was 1.75rem × 47 = 82px.
+       Now 1.4rem × 36 = 50.4px — bold, readable, proportional. */
+    /* Same 3D raised treatment as register button: top highlight,
+       bottom border for thickness, outer shadow for lift, press-in
+       on :active. */
+    .search-btn {
+      display: block;
+      width: 100%;
+      margin-top: 14px;
+      padding: 16px 18px;
+      border: none;
+      border-bottom: 3px solid rgba(0, 0, 0, 0.25);
+      border-radius: 999px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(0,0,0,0.10) 100%),
+        linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      color: #fff;
+      font-weight: 900;
+      font-size: 1.4rem;
+      letter-spacing: 0.08em;
+      box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.35),
+        0 4px 10px rgba(0, 0, 0, 0.30);
+      cursor: pointer;
+      font-family: inherit;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+      transition: box-shadow 0.15s, transform 0.15s;
+    }
+
+    .search-btn:disabled {
+      opacity: 0.5;
+    }
+
+    .search-btn:active:not(:disabled) {
+      transform: translateY(2px);
+      border-bottom-width: 1px;
+      box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.15),
+        0 1px 4px rgba(0, 0, 0, 0.25);
+    }
+
+    /* -- Search instruction text -------------------------------------------
+       Sits above the input field inside the search card. Tells the user
+       what to do — critical for first-time visitors who don't know the
+       app's purpose from the header alone. */
+    .search-instruction {
+      font-size: 1.05rem;
+      color: var(--muted);
+      text-align: center;
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
+
+    /* -- Section divider ---------------------------------------------------
+       Visual separator between the registration summary (state) and
+       qualifier cards (action). Mobile-only by default — tablet/desktop
+       layouts provide enough spatial separation without it.
+
+       Design: centered label with horizontal lines on each side.
+       Uses ::before and ::after pseudo-elements for the lines. */
+    .section-divider {
+      display: flex;
+      align-items: center;
+      margin: 24px 0 14px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .section-divider::before,
+    .section-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .section-divider span {
+      padding: 0 14px;
+      white-space: nowrap;
+    }
+
+    /* -- Welcome pill ------------------------------------------------------
+       Gradient pill showing player name. Recalibrated for 36px base.
+       Was 1.05rem × 47 = 49.4px. Now 1.1rem × 36 = 39.6px. */
+    .welcome-pill {
+      display: none;
+      margin: 14px auto;
+      padding: 8px 20px;
+      border-radius: 999px;
+      font-size: 1.35rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      color: #fff;
+      letter-spacing: 0.03em;
+      text-align: center;
+      width: fit-content;
+    }
+
+    /* -- Ineligible banner ------------------------------------------------ */
+    .ineligible-banner {
+      display: none;
+      background: var(--warning-bg);
+      border: 1px solid var(--warning-border);
+      color: var(--warning-text);
+      border-radius: 22px;
+      padding: 18px 20px;
+      margin-bottom: 18px;
+      font-size: 1.1rem;
+      line-height: 1.5;
       text-align: center;
     }
 
-    /* Accent bar top */
-    .accent-bar {
-      position: fixed; top: 0; left: 0; right: 0; height: 4px;
-      background: linear-gradient(90deg, #ea002a, #ff4466, #ea002a);
-      z-index: 10;
+    .ineligible-banner p {
+      margin-bottom: 12px;
     }
 
-    .logo {
-      font-size: clamp(48px, 12vw, 80px);
-      font-weight: 900;
-      letter-spacing: 6px;
-      background: linear-gradient(135deg, #ea002a 0%, #ff4466 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      margin-bottom: 8px;
-      line-height: 1.1;
+    .ineligible-banner p:last-child {
+      margin-bottom: 0;
     }
 
-    .subtitle {
-      font-size: clamp(12px, 3vw, 18px);
-      letter-spacing: 4px;
-      text-transform: uppercase;
-      color: #666;
-      margin-bottom: 40px;
-    }
-
-    .tagline {
-      font-size: clamp(16px, 4vw, 22px);
-      color: #aaa;
-      margin-bottom: 48px;
-      max-width: 500px;
+    /* -- Not found card --------------------------------------------------- */
+    .not-found-card {
+      display: none;
+      background: var(--card);
+      border-radius: 22px;
+      padding: 22px 20px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+      border: 1px solid var(--border);
+      margin-bottom: 18px;
+      text-align: center;
+      font-size: 1.15rem;
       line-height: 1.5;
     }
 
-    .launch-btn {
+    .not-found-card p {
+      margin-bottom: 14px;
+    }
+
+    /* -- Error content: left-justified text, centered in box --
+       The outer card has text-align: center. This inner wrapper
+       uses inline-block to shrink-wrap its content, so the block
+       itself is centered. text-align: left keeps the text and
+       bullet list left-justified within the centered block. */
+    .error-content {
       display: inline-block;
-      padding: 18px 48px;
-      font-size: 18px;
+      text-align: left;
+    }
+    .error-content ul {
+      margin: 8px 0;
+      padding-left: 20px;
+      line-height: 1.6;
+    }
+    .error-content li {
+      margin-bottom: 6px;
+    }
+
+    /* -- Contact Us button ------------------------------------------------ */
+    .contact-btn {
+      display: inline-block;
+      padding: 14px 10px;
+      width: 100%;
+      font-size: 1.05rem;
       font-weight: 800;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      text-decoration: none;
       color: #fff;
-      background: linear-gradient(135deg, #ea002a, #ff4466);
-      border: none;
-      border-radius: 60px;
-      cursor: pointer;
-      box-shadow: 0 8px 32px rgba(234, 0, 42, 0.35);
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .launch-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 12px 40px rgba(234, 0, 42, 0.5);
-    }
-    .launch-btn:active {
-      transform: translateY(0);
-    }
-
-    .footer {
-      position: fixed; bottom: 0; left: 0; right: 0;
-      padding: 16px;
+      text-decoration: none;
+      border-radius: 22px;
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+      line-height: 1.3;
       text-align: center;
-      font-size: 11px;
-      color: #444;
-      letter-spacing: 1px;
+      transition: opacity 0.2s;
     }
-    .footer a { color: #666; text-decoration: none; }
-    .footer a:hover { color: #ea002a; }
 
-    /* Pulse animation on the button */
-    @keyframes pulse {
-      0%, 100% { box-shadow: 0 8px 32px rgba(234, 0, 42, 0.35); }
-      50% { box-shadow: 0 8px 48px rgba(234, 0, 42, 0.55); }
+    .contact-btn:active {
+      opacity: 0.85;
     }
-    .launch-btn { animation: pulse 2.5s ease-in-out infinite; }
-    .launch-btn:hover { animation: none; }
+
+    /* -- Large contact banner (footer CTA, double the standard contact-btn) -- */
+    .contact-banner {
+      display: block;
+      padding: 28px 10px;
+      width: 100%;
+      font-size: 2.1rem;
+      font-weight: 800;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 22px;
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+      line-height: 1.3;
+      text-align: center;
+      transition: opacity 0.2s;
+    }
+    .contact-banner:active {
+      opacity: 0.85;
+    }
+
+    /* -- Eligibility note (10-score requirement) -------------------------- */
+    /* Eligibility requirement callout — amber standout box. Visually
+       distinct from regular text so players don't miss the 10-score rule. */
+    .eligibility-note {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: #856404;
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 14px;
+      text-align: center;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+      line-height: 1.4;
+    }
+
+    /* -- Qualifier cards -------------------------------------------------- */
+    .qual-card {
+      background: var(--card);
+      border-radius: 22px;
+      padding: 20px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+      border: 1px solid var(--border);
+      margin-bottom: 18px;
+      text-align: center;
+      transition: background 0.3s, border-color 0.3s;
+      animation: slideDown 0.3s ease-out;
+    }
+
+    /* Registered card colors reflect admin eligibility status:
+       - card-elig-confirmed: green (eligible)
+       - card-elig-ineligible: red (not eligible)
+       - card-elig-pending: amber (pending review) — default for new registrations */
+    .qual-card.card-registered {
+      border-left: 6px solid #ffc107;
+      background: #fffbeb;
+    }
+    .qual-card.card-registered.card-elig-confirmed {
+      border-left: 6px solid var(--registered-border);
+      background: var(--registered-bg);
+    }
+    .qual-card.card-registered.card-elig-ineligible {
+      border-left: 6px solid #dc3545;
+      background: #fdf0f1;
+    }
+    .qual-card.card-registered.card-elig-pending {
+      border-left: 6px solid #ffc107;
+      background: #fffbeb;
+    }
+
+    .qual-card.card-closed {
+      opacity: 0.65;
+    }
+
+    /* Closed BUT registered: slightly less muted than fully-closed cards.
+       Player needs to see they're still registered and can cancel.
+       Green registered background is preserved; reduced opacity signals
+       "closed" but not as much as unregistered-closed cards. */
+    .qual-card.card-closed.card-registered {
+      opacity: 0.82;
+    }
+
+    .qual-card.card-disabled {
+      opacity: 0.55;
+    }
+
+    /* qual-date: 1.5rem = 54px — matches header status text height.
+       User feedback: card text was too small vs "6 qualifiers available". */
+    .qual-date {
+      font-size: 1.5rem;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .format-badge {
+      display: inline-block;
+      font-size: 1.15rem;
+      font-weight: 700;
+      padding: 4px 16px;
+      border-radius: 999px;
+      color: #fff;
+      margin-bottom: 10px;
+    }
+
+    .format-8 {
+      background: var(--spm-primary);
+    }
+
+    .format-9 {
+      background: var(--spm-accent);
+    }
+
+    .qual-time {
+      font-size: 1.25rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    /* Location is now a clickable link to Google Maps (opens in new tab).
+       Address line removed — the link provides directions + full address.
+       Styled as underlined link text, inheriting card color scheme. */
+    .qual-location {
+      font-size: 1.35rem;
+      margin-bottom: 14px;
+      font-weight: 600;
+      color: var(--spm-accent);
+      text-decoration: underline;
+      text-decoration-color: rgba(0, 49, 161, 0.3);
+      text-underline-offset: 2px;
+    }
+    .qual-location:visited { color: var(--spm-accent); }
+    .qual-location:hover { text-decoration-color: var(--spm-accent); }
+
+    /* -- Eligibility status badge ------------------------------------------
+       Shown on each qualifier card after registration/lookup. Pulls from
+       the _Eligibility sheet via lookupPlayer. Three states:
+         - Pending (no entry)  → muted amber "Pending Review"
+         - Eligible            → green text
+         - Ineligible          → red text
+       The badge sits between the location and the register button. */
+    .elig-badge {
+      font-size: 0.92rem;
+      font-weight: 700;
+      padding: 8px 14px;
+      border-radius: 12px;
+      display: block;
+      margin-bottom: 10px;
+      letter-spacing: 0.04em;
+      text-align: center;
+      width: 90%;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .elig-pending {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffc107;
+    }
+    .elig-eligible {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #28a745;
+    }
+    .elig-ineligible {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #dc3545;
+    }
+
+    /* -- Register/Cancel button -------------------------------------------
+       Pill-shaped (999px radius), centered, not full-width.
+       3D raised look via layered techniques:
+         1. Top-to-bottom gradient overlay: lighter top → darker bottom
+         2. Inset box-shadow: bright highlight along top edge
+         3. Outer box-shadow: dark shadow underneath for "lifted" depth
+         4. border-bottom: subtle darker edge for thickness
+       On :active, the button "presses in" — shadow shrinks, translateY
+       shifts down, and the top highlight dims. */
+    .register-btn {
+      display: block;
+      width: auto;
+      margin: 0 auto;
+      padding: 14px 40px;
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      color: #fff;
+      border: none;
+      border-bottom: 3px solid rgba(0, 0, 0, 0.25);
+      border-radius: 999px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(0,0,0,0.10) 100%),
+        linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.35),
+        0 4px 10px rgba(0, 0, 0, 0.30);
+      cursor: pointer;
+      font-family: inherit;
+      line-height: 1.3;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+      transition: box-shadow 0.15s, transform 0.15s, background 0.3s;
+    }
+
+    .register-btn:active:not(:disabled) {
+      transform: translateY(2px);
+      border-bottom-width: 1px;
+      box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.15),
+        0 1px 4px rgba(0, 0, 0, 0.25);
+    }
+
+    .register-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Cancel button: 3D treatment using the format color (red for 8-ball,
+       blue for 9-ball) instead of green. Matches the format badge color
+       so the cancel action is visually tied to the format. */
+    .register-btn.btn-cancel {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(0,0,0,0.10) 100%),
+        var(--spm-primary);
+      box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.35),
+        0 4px 10px rgba(234, 0, 42, 0.35);
+    }
+    .register-btn.btn-cancel-9 {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(0,0,0,0.10) 100%),
+        var(--spm-accent);
+      box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.35),
+        0 4px 10px rgba(0, 49, 161, 0.35);
+    }
+
+    /* Closed button: flat/muted — no 3D effect (not interactive). */
+    .register-btn.btn-closed {
+      background: #999;
+      border-bottom: none;
+      box-shadow: none;
+      text-shadow: none;
+      cursor: not-allowed;
+    }
+
+    /* Closed-but-registered: card is closed (registration window passed)
+       but the player IS registered and can still cancel. Uses a muted
+       cancel button (not the vibrant green) to signal "closed" while
+       remaining tappable. Two-line text: "Closed" + "Cancel Registration". */
+    .register-btn.btn-closed-cancel {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(0,0,0,0.08) 100%),
+        #777;
+      border-bottom: 2px solid rgba(0, 0, 0, 0.2);
+      box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.2),
+        0 2px 6px rgba(0, 0, 0, 0.2);
+      line-height: 1.4;
+    }
+
+    .register-btn.btn-closed-cancel:active:not(:disabled) {
+      transform: translateY(2px);
+      border-bottom-width: 1px;
+      box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.1),
+        0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    /* -- Modal (confirmation + info) --------------------------------------
+       Uses REM values pegged to the 36px base — same as cards and summary.
+       The modal panel is nearly full-screen width on mobile (100% minus
+       16px overlay padding on each side), so rem values render at the same
+       visual weight as the page content behind it.
+
+       HISTORY: Originally used hardcoded px (18-24px) under the rationale
+       that "rem at 47px base = oversized in modals." At 36px base, the
+       opposite happened — 18-24px was unreadably small (user had to zoom).
+       Same lesson as the summary panel: px values decouple from the page
+       scale and become invisible. */
+    /* -- Modal overlay --
+       CalendarViewer pattern: fixed overlay with padding on the overlay
+       itself (not width% on the panel). Edge-to-edge feel with breathing
+       room from screen edges. */
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.58);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+      padding: 16px;
+    }
+
+    /* -- Modal panel --
+       width: 100% fills the overlay padding area (16px from each edge).
+       max-width: 900px prevents absurd width on tablets/desktop.
+       Same approach as CalendarViewer which works great on mobile. */
+    .modal-panel {
+      background: #fff;
+      border-radius: 22px;
+      padding: 34px 28px 28px;
+      width: 100%;
+      max-width: 900px;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
+      text-align: center;
+    }
+
+    /* -- Modal icon: REMOVED --
+       Previously had a checkmark/question-mark circle above the title.
+       User feedback: unnecessary visual clutter on mobile — the title
+       is sufficient context. Icon div still exists in HTML but is hidden
+       via display:none so showInfoModal/showConfirmModal don't need
+       changes beyond this CSS rule. */
+    .modal-icon {
+      display: none;
+    }
+
+    /* 1.35rem = 48.6px — same tier as qual-location and register button. */
+    .modal-title {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    /* 1.1rem = 39.6px — readable body text, same as welcome pill.
+       white-space: pre-line — respects \n in textContent as visible
+       line breaks. Used by showInfoModal to separate qualifier details
+       from the "confirmation email sent" note. */
+    .modal-message {
+      font-size: 1.1rem;
+      line-height: 1.5;
+      margin-bottom: 26px;
+      color: #555;
+      white-space: pre-line;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    /* 1.15rem = 41.4px — matches format badge size, clearly tappable. */
+    .modal-btn {
+      flex: 1;
+      padding: 16px 0;
+      font-size: 1.15rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity 0.15s;
+    }
+
+    .modal-btn:active {
+      opacity: 0.82;
+    }
+
+    .modal-btn-confirm {
+      background: var(--spm-primary);
+      color: #fff;
+    }
+
+    .modal-btn-dismiss {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .modal-btn-ok {
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      color: #fff;
+    }
+
+    /* -- Registration Summary Panel ----------------------------------------
+       Collapsible accordion between welcome pill and qualifier cards.
+       Shows the player's current registrations at a glance. Hidden when
+       the player has 0 registrations. Positioned below welcome, above
+       qualifier cards — "context (who) → state (what you have) → action
+       (what you can do)" hierarchy.
+
+       Design decisions based on 2025-2026 mobile UI research:
+         - NOT sticky (steals mobile screen space, conflicts with keyboards)
+         - Collapsible (primary action is registering, not reviewing)
+         - Hidden when empty (no "0 registrations" clutter)
+
+       SIZING HISTORY:
+         v10-v14: Used hardcoded px (15-20px) — rationale was "modals need px
+         because rem at 47px base = oversized." But at 36px base the opposite
+         happened: px values were far SMALLER than surrounding rem content,
+         making the summary unreadable (user had to pinch-zoom).
+
+         v16: Switched to REM values pegged to the 36px base so the summary
+         reads at the same visual tier as qualifier cards. The modal rationale
+         doesn't apply here — the summary lives in the normal page flow, not
+         an overlay panel, so it should scale with body content.
+
+       REM reference (at 36px base):
+         1.1rem = 39.6px   (comparable to qual-location 1.1rem)
+         1.0rem = 36px     (comparable to qual-time 1.05rem)
+         0.85rem = 30.6px  (format badges — slightly smaller than card badges)
+         0.8rem = 28.8px   (secondary text — location in items)
+    */
+
+    /* -- Summary container --
+       Full-width touchable bar with checkmark icon, title, count badge,
+       and chevron. Subtle blue tint to distinguish from neutral cards. */
+    .reg-summary {
+      display: none;
+      margin-bottom: 18px;
+      border-radius: 22px;
+      overflow: hidden;
+      background: rgba(0, 49, 161, 0.04);
+      border: 1px solid rgba(0, 49, 161, 0.18);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+      animation: slideDown 0.3s ease-out;
+    }
+
+    /* -- Summary header bar (always visible when panel is shown) --
+       Flex row: icon + title stretches, count badge + chevron on right.
+       Entire bar is the tap target. Tight padding to minimize whitespace. */
+    .reg-summary-bar {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    .reg-summary-bar:active {
+      background: rgba(0, 49, 161, 0.08);
+    }
+
+    /* -- Checkmark icon circle (left side) --
+       1.6rem = 57.6px circle, 0.95rem = 34.2px checkmark glyph.
+       Scaled up to match the 1.5rem title text. */
+    .reg-summary-icon {
+      width: 1.6rem;
+      height: 1.6rem;
+      border-radius: 50%;
+      background: #d4edda;
+      color: #28a745;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.95rem;
+      font-weight: 900;
+      flex-shrink: 0;
+      margin-right: 10px;
+    }
+
+    /* -- Title: "Your Registrations" (stretches to fill) --
+       1.5rem = 54px — matches header status text ("6 qualifiers available")
+       and qual-date so the summary reads at the same visual weight. */
+    .reg-summary-title {
+      flex: 1;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    /* -- Count badge pill (right of title) --
+       1.5rem tall, 0.95rem text — proportional to the 1.5rem title. */
+    .reg-summary-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.5rem;
+      height: 1.5rem;
+      padding: 0 0.4rem;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 800;
+      margin-right: 8px;
+    }
+
+    /* -- Chevron indicator (expand/collapse) --
+       0.95rem = 34.2px — proportional to the bigger bar elements. */
+    .reg-summary-chevron {
+      font-size: 0.95rem;
+      color: var(--muted);
+      transition: transform 0.25s ease;
+      flex-shrink: 0;
+    }
+
+    .reg-summary.expanded .reg-summary-chevron {
+      transform: rotate(180deg);
+    }
+
+    /* -- Expanded content area (registration list items) --
+       Slides open below the bar. Hidden by default (max-height: 0 +
+       overflow: hidden). Expanded via .expanded class. */
+    .reg-summary-body {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+      border-top: 0 solid transparent;
+    }
+
+    .reg-summary.expanded .reg-summary-body {
+      max-height: 600px;
+      border-top: 1px solid rgba(0, 49, 161, 0.12);
+    }
+
+    .reg-summary-list {
+      padding: 8px 14px 12px;
+    }
+
+    /* -- Individual registration item --
+       Compact row: format pill + date + location. Green left accent
+       for visual recognition. Each item is one confirmed registration.
+       Tap navigates to the corresponding qualifier card. */
+    .reg-summary-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      margin-bottom: 6px;
+      background: #fff;
+      border-radius: 16px;
+      border: 1px solid rgba(0, 0, 0, 0.07);
+      border-left: 4px solid var(--registered-border);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s;
+    }
+
+    .reg-summary-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .reg-summary-item:active {
+      background: #f0faf3;
+    }
+
+    /* -- Format badge inside summary item --
+       1.15rem = 41.4px — matches card format badges so the summary
+       items read at the same tier as the qualifier cards. */
+    .reg-summary-format {
+      display: inline-block;
+      font-size: 1.15rem;
+      font-weight: 700;
+      padding: 4px 14px;
+      border-radius: 999px;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    /* -- Date + location text block -- */
+    .reg-summary-details {
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* 1.35rem = 48.6px — matches qual-location so summary item dates
+       read at the same weight as card content. */
+    .reg-summary-date {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 1.05rem = 37.8px — secondary text, matches qual-time. */
+    .reg-summary-location {
+      font-size: 1.05rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    /* -- Footer ----------------------------------------------------------- */
+    footer {
+      text-align: center;
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin: 30px 0 0;
+      line-height: 1.4;
+    }
+
+    /* -- Animations ------------------------------------------------------- */
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* -- Badge count bounce animation (when count changes) -- */
+    @keyframes badgeBounce {
+      0%   { transform: scale(1); }
+      40%  { transform: scale(1.25); }
+      100% { transform: scale(1); }
+    }
+
+    .badge-bounce {
+      animation: badgeBounce 0.35s ease;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+
+    /* ================================================================
+       TABLET OVERRIDES (screen.width 768–1199)
+       ================================================================
+       Applied when JS adds class="tablet" to <body>.
+       Constrained width, slightly smaller font, centered layout.
+       Mobile base is completely untouched when this class is absent.
+
+       See: Docs/gas-responsive-ui-standard.md
+       ================================================================ */
+
+    body.tablet {
+      font-size: 20px;
+      background: #e8e8e8;
+    }
+
+    body.tablet .page {
+      max-width: 620px;
+      margin: 0 auto;
+      padding: 16px;
+      width: 100%;
+    }
+
+    /* Header: scale down from mobile's 70/79/57px to proportional tablet sizes */
+    body.tablet .title { font-size: 36px; }
+    body.tablet .subtitle { font-size: 40px; }
+    body.tablet .beta-pill {
+      font-size: 22px;
+      padding: 8px 0;
+      border: 2px solid rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.25);
+    }
+    body.tablet .header-status { font-size: 26px; }
+    body.tablet header { border-radius: 16px; }
+
+    /* Search */
+    body.tablet .search-card { border-radius: 16px; padding: 16px; }
+    body.tablet .search-instruction { font-size: 15px; margin-bottom: 10px; }
+    body.tablet .search-input { font-size: 20px; padding: 12px 16px; }
+    body.tablet .search-btn { font-size: 18px; padding: 12px 16px; }
+
+    /* Welcome pill */
+    body.tablet .welcome-pill { font-size: 20px; padding: 6px 18px; }
+
+    /* Cards */
+    body.tablet .qual-card { border-radius: 16px; padding: 16px; }
+    body.tablet .qual-date { font-size: 22px; }
+    body.tablet .format-badge { font-size: 16px; padding: 3px 14px; }
+    body.tablet .qual-time { font-size: 18px; }
+    body.tablet .qual-location { font-size: 20px; }
+    body.tablet .elig-badge { font-size: 14px; padding: 6px 12px; border-radius: 10px; }
+    body.tablet .register-btn { font-size: 18px; padding: 12px 36px; }
+
+    /* Messages */
+    body.tablet .msg { font-size: 16px; border-radius: 16px; }
+    body.tablet .ineligible-banner { font-size: 16px; border-radius: 16px; }
+    body.tablet .not-found-card { font-size: 16px; border-radius: 16px; }
+    body.tablet .contact-btn { font-size: 15px; border-radius: 16px; }
+    body.tablet .contact-banner { font-size: 30px; padding: 22px 10px; border-radius: 16px; }
+
+    /* Registration summary */
+    body.tablet .reg-summary { border-radius: 16px; }
+    body.tablet .reg-summary-icon { width: 28px; height: 28px; font-size: 14px; }
+    body.tablet .reg-summary-title { font-size: 20px; }
+    body.tablet .reg-summary-count { min-width: 24px; height: 24px; font-size: 14px; padding: 0 6px; }
+    body.tablet .reg-summary-chevron { font-size: 14px; }
+    body.tablet .reg-summary-format { font-size: 15px; padding: 3px 12px; }
+    body.tablet .reg-summary-date { font-size: 18px; }
+    body.tablet .reg-summary-location { font-size: 15px; }
+    body.tablet .reg-summary-item { border-radius: 12px; padding: 8px 12px; }
+    /* Auto-expand summary on tablet (same rationale as desktop — ample space) */
+    body.tablet .reg-summary-chevron { display: none; }
+    body.tablet .reg-summary .reg-summary-body {
+      max-height: 600px;
+      border-top: 1px solid rgba(0, 49, 161, 0.12);
+    }
+
+    /* Section divider: hidden on tablet (layout provides separation) */
+    body.tablet .section-divider { display: none !important; }
+    body.tablet .eligibility-note { font-size: 14px; margin-bottom: 10px; padding: 10px 14px; border-radius: 10px; }
+
+    /* Modal */
+    body.tablet .modal-panel { border-radius: 16px; padding: 24px 20px 20px; }
+    body.tablet .modal-title { font-size: 20px; }
+    body.tablet .modal-message { font-size: 16px; }
+    body.tablet .modal-btn { font-size: 16px; padding: 12px 0; }
+
+    /* Footer */
+    body.tablet footer { font-size: 13px; }
+
+
+    /* ================================================================
+       DESKTOP OVERRIDES (screen.width >= 1200)
+       ================================================================
+       Applied when JS adds class="desktop" to <body>.
+
+       KEY DESIGN DECISIONS (2026-02-23 overhaul):
+       1. CSS Grid for qualifier cards — auto-fill 2-column layout
+          means all 4-6 cards visible without scrolling (no infinite
+          scroll feel). Uses minmax(340px, 1fr) which at 900px page
+          width yields exactly 2 columns.
+       2. Compact header — reduced padding, smaller text. The header
+          is branding chrome, not the primary content. On desktop
+          it should get out of the way.
+       3. Always-expanded registration summary — on desktop there's
+          no screen real estate pressure, so the summary panel is
+          always open (no need to collapse).
+       4. Section divider hidden — the grid layout + whitespace
+          provides enough visual separation between sections.
+       5. All font sizes in EXPLICIT PX — never change the mobile
+          base rem. See gas-responsive-ui-standard.md.
+
+       See: Docs/gas-responsive-ui-standard.md
+       ================================================================ */
+
+    body.desktop {
+      font-size: 14px;
+      background: #e8e8e8;
+    }
+
+    body.desktop .page {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      width: 100%;
+    }
+
+    /* -- Desktop Header: full-width branded banner --
+       Width matches the card grid (no max-width constraint — it fills
+       the .page container just like #qualifierContainer does).
+
+       Text is sized to feel proportional to the card content below.
+       The cards have 15px bold dates, so the header title needs to
+       be noticeably larger to establish hierarchy.
+
+       The beta pill ("Singles Qualifier Registration") is converted
+       to plain text on desktop — the pill shape (999px radius) doesn't
+       work with long text at small sizes. As plain styled text it
+       reads cleanly without the awkward rounded box. */
+    body.desktop header {
+      padding: 18px 24px 14px;
+      margin-bottom: 12px;
+      border-radius: 12px;
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+    }
+    /* Mobile base sizes → desktop sizes (proportional scaling):
+       Mobile: title 70px, subtitle 79px, pill 57px, status 54px
+       Desktop: ~55-60% of mobile values. Desktop content area is
+       ~900px vs ~400px mobile, but users sit farther from screen.
+       These values feel proportionally similar to the mobile banner. */
+    body.desktop .title { font-size: 42px; line-height: 1.1; }
+    body.desktop .subtitle { font-size: 48px; }
+    body.desktop .beta-pill {
+      /* Pill: inline-block so it wraps the text (not full-width).
+         Thicker border + stronger background than mobile base so
+         the pill is clearly visible against the gradient header. */
+      display: inline-block;
+      width: auto;
+      font-size: 20px;
+      margin-top: 8px;
+      padding: 6px 28px;
+      letter-spacing: 0.12em;
+      border: 2px solid rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.25);
+    }
+    /* Header status text ("Searching…", "6 qualifiers available") is
+       redundant on desktop — the button already shows "SEARCHING…" and
+       all cards are visible. Hide it entirely. */
+    body.desktop .header-status { display: none; }
+    body.desktop .subtitle-group { margin-top: 6px; }
+
+    /* -- Desktop Search: centered, constrained, tight -- */
+    /* Desktop search: horizontal row layout. Input and button sit
+       side by side instead of stacked. Instruction text hidden —
+       the placeholder is sufficient on desktop where users expect
+       search patterns. Flexbox row with input expanding to fill. */
+    body.desktop .search-card {
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    body.desktop .search-instruction { display: none; }
+    body.desktop .search-input {
+      font-size: 16px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      flex: 1;
+      min-width: 0;
+      width: auto;
+    }
+    body.desktop .search-btn {
+      font-size: 15px;
+      padding: 8px 18px;
+      border-radius: 999px;
+      letter-spacing: 0.06em;
+      width: auto;
+      margin-top: 0;
+    }
+
+    /* -- Desktop Welcome pill -- */
+    /* Mobile welcome pill: 1.35rem × 36px = 48.6px. Desktop at ~60%: 28px. */
+    body.desktop .welcome-pill { font-size: 28px; padding: 6px 24px; margin: 10px auto; }
+
+    /* -- Desktop Section divider: hidden (grid layout provides separation) -- */
+    body.desktop .section-divider { display: none !important; }
+    body.desktop .eligibility-note { font-size: 12px; margin-bottom: 8px; padding: 8px 12px; border-radius: 8px; }
+
+    /* -- Desktop Registration Summary: HIDDEN --
+       On desktop, registration status is visible directly on the cards
+       (green border + "Cancel Registration" button). The summary was
+       designed for mobile where cards scroll off-screen. On desktop
+       all cards are visible in the weekend-paired grid — the summary
+       box is redundant and wastes vertical space. */
+    body.desktop .reg-summary { display: none !important; }
+
+    /* -- Desktop Qualifier Cards: INFORMATION ARCHITECTURE REDESIGN --
+
+       PROBLEM (v33-v37): Cards were vertically-stacked, center-aligned
+       mobile cards at smaller font sizes. All 6 data fields had equal
+       visual weight. User correctly identified this as "adjusting font
+       sizes instead of reorganizing data."
+
+       SOLUTION: Reorganize card content by information priority:
+
+       Priority hierarchy (what drives the user's decision):
+         1. DATE — "Am I free?" (most important — bold, left, prominent)
+         2. FORMAT — "8-ball or 9-ball?" (color-coded badge inline w/ date)
+         3. STATUS — "Can I register?" (button — clear, right-aligned)
+         4. LOCATION — "Where?" (secondary — smaller, under date)
+         5. TIME — "What time?" (tertiary — combined with location line)
+         6. ADDRESS — "Exact street?" (lowest — tiny, you Google it once)
+
+       Layout: CSS Grid on the CARD ITSELF arranges children into a
+       structured horizontal layout:
+
+         [8-Ball]  Saturday, March 21
+                   Silver Star Saloon · 10:00 AM – 7:00 PM      [Register]
+                   6718 NE Fourth Plain Blvd, Vancouver WA
+
+       The format badge + date are the "header row" of the card.
+       Location + time merge visually (dot separator via CSS).
+       Address fades to near-invisible — there for reference, not for
+       scanning. Button anchored to the right.
+
+       Container stays 2-column grid for weekend Sat/Sun pairing
+       (user-requested feature from v37). */
+    body.desktop #qualifierContainer {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    /* -- Desktop Grid Column Headers --
+       "Saturday" and "Sunday" labels above the 2-column weekend grid.
+       These are injected as the first two children of #qualifierContainer
+       by renderQualifiers(). They sit in the first row of the grid,
+       spanning exactly one column each, providing clear context for
+       users who didn't understand what the empty placeholder slots meant. */
+    body.desktop .grid-col-header {
+      font-size: 15px;
+      font-weight: 800;
+      color: #555;
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      padding: 0 0 4px;
+      /* No background/border — just floating text labels above the cards. */
+    }
+    body.desktop .qual-card {
+      border-radius: 10px;
+      padding: 10px 10px;
+      margin-bottom: 0;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+      text-align: center;
+
+      /* CSS Grid with snug fixed-width edge columns:
+         - Badge column (60px): fits "8-Ball"/"9-Ball" badge at 14px + padding
+         - Details column (1fr): flexible, fills remaining space
+         - Button column (160px): fits "Cancel Registration" at 15px + padding
+         All elements centered within their sections. Fixed widths ensure
+         consistent alignment across all cards in the grid. */
+      display: grid;
+      grid-template-columns: 76px 1fr 160px;
+      grid-template-rows: auto auto auto auto;
+      column-gap: 0;
+      row-gap: 0;
+      align-items: center;
+    }
+
+    /* Format badge: fixed 70px left column, spans all rows.
+       Centered within its cell — the color block is the visual anchor
+       (red for 8-ball, blue for 9-ball). */
+    body.desktop .format-badge {
+      grid-column: 1;
+      grid-row: 1 / 5;
+      align-self: center;
+      justify-self: center;
+      font-size: 14px;
+      padding: 5px 12px;
+      margin-bottom: 0;
+      writing-mode: horizontal-tb;
+    }
+
+    /* Content column: date, location, time, eligibility — stacked vertically, centered. */
+    body.desktop .qual-date {
+      grid-column: 2;
+      grid-row: 1;
+      font-size: 19px;
+      font-weight: 800;
+      margin-bottom: 1px;
+    }
+
+    body.desktop .qual-location {
+      grid-column: 2;
+      grid-row: 2;
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 0;
+      display: block;
+      color: var(--spm-accent);
+      text-decoration-color: rgba(0, 49, 161, 0.25);
+    }
+    body.desktop .qual-time {
+      grid-column: 2;
+      grid-row: 3;
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 0;
+    }
+    body.desktop .elig-badge {
+      grid-column: 2;
+      grid-row: 4;
+      font-size: 11px;
+      padding: 4px 10px;
+      margin-bottom: 0;
+      justify-self: stretch;
+      width: auto;
+      border-radius: 8px;
+    }
+
+    /* Button: fixed right column, spans all rows, centered in its cell.
+       No max-width needed — the column width constrains it. */
+    body.desktop .register-btn {
+      grid-column: 3;
+      grid-row: 1 / 5;
+      align-self: center;
+      justify-self: center;
+      font-size: 15px;
+      padding: 7px 14px;
+      margin: 0;
+      text-align: center;
+      line-height: 1.3;
+    }
+    /* 80% font for loading state — "REGISTERING…" / "CANCELLING…"
+       are longer strings that don't center well at 15px in the button. */
+    body.desktop .register-btn.btn-loading {
+      font-size: 12px;
+    }
+
+    /* Desktop closed cards: slightly higher opacity than mobile.
+       On mobile (large cards), 0.65 works because the card takes up
+       a full screen and the muted visual is obvious. On desktop compact
+       rows, 0.65 makes text too hard to read — the "Closed" button
+       already communicates the state, so we only need a subtle fade. */
+    body.desktop .qual-card.card-closed { opacity: 0.75; }
+    body.desktop .qual-card.card-closed.card-registered { opacity: 0.88; }
+
+    /* -- Desktop Messages -- */
+    body.desktop .msg { font-size: 13px; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+    body.desktop .ineligible-banner { font-size: 13px; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+    body.desktop .not-found-card { font-size: 13px; border-radius: 8px; padding: 14px; max-width: 420px; margin: 0 auto 10px; }
+    body.desktop .contact-btn { font-size: 12px; border-radius: 6px; max-width: 200px; margin: 0 auto; display: block; padding: 8px 8px; }
+    body.desktop .contact-banner { font-size: 18px; padding: 14px 10px; border-radius: 10px; max-width: 400px; margin: 0 auto; }
+
+    /* -- Desktop Modal -- */
+    body.desktop .modal-panel { border-radius: 12px; padding: 18px 20px 16px; max-width: 380px; }
+    body.desktop .modal-title { font-size: 15px; }
+    body.desktop .modal-message { font-size: 13px; margin-bottom: 14px; }
+    body.desktop .modal-btn { font-size: 13px; padding: 8px 0; }
+
+    /* -- Desktop Footer -- */
+    body.desktop footer { font-size: 11px; margin-top: 12px; }
+
+    /* -- Desktop Empty weekend slot placeholder --
+       Overrides the grid layout from .qual-card since empty slots
+       don't have format-badge/date/location/button children.
+       Simple centered flex layout instead. */
+    body.desktop .qual-card.card-empty {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: transparent;
+      border: 1px dashed #bbb;
+      box-shadow: none;
+      min-height: 60px;
+    }
+    body.desktop .qual-card.card-empty .empty-day {
+      font-size: 13px;
+      font-weight: 700;
+      color: #777;
+    }
+    body.desktop .qual-card.card-empty .empty-msg {
+      font-size: 11px;
+      color: #888;
+      font-style: italic;
+      margin-top: 2px;
+    }
+
+    /* -- Desktop Hover Effects (only desktop has a mouse) --
+       Cards lift on hover, buttons brighten. */
+    body.desktop .qual-card {
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    body.desktop .qual-card:hover:not(.card-empty) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+    }
+    body.desktop .register-btn:hover:not(:disabled) {
+      filter: brightness(1.08);
+    }
+    body.desktop .search-btn:hover:not(:disabled) {
+      filter: brightness(1.08);
+    }
+    body.desktop .modal-btn:hover {
+      filter: brightness(1.06);
+    }
+
   </style>
-  <script>
-    // Facebook in-app browser detection — auto-redirect instead of showing
-    // a launch button (target="_blank" doesn't work in FB's webview).
-    var APP_URL = 'https://script.google.com/macros/s/AKfycbwpC0POf2V-pSKzcdhdC7AdiYGaGVibNfEwHuka07b8Z9QOypMYkqOLrtayiWIR3uJvnQ/exec';
-    var ua = navigator.userAgent || '';
-    if (/FBAN|FBAV|Instagram|Messenger/i.test(ua)) {
-      // In-app browser: redirect immediately
-      window.location.href = APP_URL;
-    }
-  </script>
 </head>
 <body>
-  <div class="accent-bar"></div>
 
+  <!-- Page wrapper: 100vw + 6px padding = PatchCheck/SharpShooters standard -->
   <div class="page">
-    <div class="logo">MULTIPASS</div>
-    <div class="subtitle">South Portland Metro APA</div>
-    <div class="tagline">Check your eligibility and register for singles qualifiers</div>
-    <a class="launch-btn" id="launchBtn"
-       href="https://script.google.com/macros/s/AKfycbwpC0POf2V-pSKzcdhdC7AdiYGaGVibNfEwHuka07b8Z9QOypMYkqOLrtayiWIR3uJvnQ/exec"
-       target="_blank"
-       rel="noopener">
-      Launch MULTIPASS
-    </a>
-  </div>
 
-  <div class="footer">
-    <a href="https://linktr.ee/spmapa">linktr.ee/spmapa</a>
-  </div>
+    <!-- ================================================================
+         HEADER
+         ================================================================ -->
+    <header>
+      <h1 class="title">South Portland Metro APA</h1>
+      <div class="subtitle-group">
+        <div class="subtitle" id="headerTitle">MultiPass</div>
+        <div class="beta-pill">Singles Qualifier Registration</div>
+      </div>
+      <div class="header-status" id="statusText"></div>
+    </header>
+
+    <!-- Message container -->
+    <div id="messageContainer"></div>
+
+    <!-- ================================================================
+         SEARCH FORM
+         ================================================================ -->
+    <form class="search-card" id="searchForm" autocomplete="off" onsubmit="return false;">
+      <!-- Search instruction removed — placeholder text is sufficient on all devices -->
+      <input
+        id="searchInput"
+        class="search-input"
+        type="text"
+        enterkeyhint="search"
+        autocomplete="off"
+        placeholder="Email or APA #"
+      />
+      <button id="searchBtn" class="search-btn" type="submit">
+        FIND ME
+      </button>
+    </form>
+
+    <!-- ================================================================
+         WELCOME PILL
+         ================================================================ -->
+    <div class="welcome-pill" id="welcomePill"></div>
+
+    <!-- ================================================================
+         INELIGIBLE BANNER
+         ================================================================ -->
+    <div class="ineligible-banner" id="ineligibleBanner">
+      <div class="error-content">
+        <p><strong>We found your account, but you're not currently listed as an active player this session.</strong></p>
+        <p>This can happen if:</p>
+        <ul>
+          <li>You were <strong>recently added</strong> to a team and our roster hasn't updated yet</li>
+          <li>You're <strong>not yet on a team</strong> but would like to join one</li>
+          <li>There's a <strong>data issue</strong> on our end</li>
+        </ul>
+        <p>Please reach out and we'll get it sorted!</p>
+      </div>
+    </div>
+
+    <!-- ================================================================
+         REGISTRATION SUMMARY PANEL
+         ================================================================
+         Collapsible accordion showing events the player is registered for.
+         Hidden when count = 0. Position: below welcome pill, above qualifier
+         cards. This follows the "context → state → action" hierarchy.
+         Tapping the bar expands/collapses the detail list. Tapping an
+         individual item scrolls to the corresponding qualifier card. -->
+    <div class="reg-summary" id="regSummary">
+      <div class="reg-summary-bar" id="regSummaryBar">
+        <div class="reg-summary-icon">&#10003;</div>
+        <div class="reg-summary-title">Your Registrations</div>
+        <div class="reg-summary-count" id="regSummaryCount">0</div>
+        <div class="reg-summary-chevron" id="regSummaryChevron">&#9660;</div>
+      </div>
+      <div class="reg-summary-body">
+        <div class="reg-summary-list" id="regSummaryList"></div>
+      </div>
+    </div>
+
+    <!-- ================================================================
+         SECTION DIVIDER — separates summary from action cards
+         ================================================================
+         On mobile, the registration summary and qualifier cards are
+         visually similar (both cards). This divider creates a clear
+         boundary: "what you have" (summary) vs "what you can do" (cards).
+         Hidden by default, shown by renderQualifiers() when cards exist.
+         Hidden on tablet/desktop where layout itself provides separation. -->
+    <div class="section-divider" id="qualifierDivider" style="display:none;">
+      <span>AVAILABLE QUALIFIERS</span>
+    </div>
+
+    <!-- ================================================================
+         CONTACT BANNER — Big gradient CTA between divider and cards.
+         Hidden by default, shown by renderQualifiers() alongside the
+         qualifier cards. Same visibility lifecycle as eligibility note.
+         ================================================================ -->
+    <div id="contactBanner" style="display:none; text-align: center; margin-bottom: 14px;">
+      <a class="contact-banner" href="https://linktr.ee/spmContactUs" target="_blank">
+        Questions? Hit Us Up
+      </a>
+    </div>
+
+    <!-- ================================================================
+         ELIGIBILITY NOTE — 10-score requirement
+         ================================================================
+         Shown when qualifier cards are displayed. Hidden by default,
+         toggled by renderQualifiers(). Informational only — the server
+         enforces actual eligibility via the Current Session Players list. -->
+    <div class="eligibility-note" id="eligibilityNote" style="display:none;">
+      &#9888;&#65039; You must have at least 10 scores in the format within the last 2 years to qualify.
+    </div>
+
+    <!-- ================================================================
+         QUALIFIER CARDS CONTAINER
+         ================================================================ -->
+    <div id="qualifierContainer"></div>
+
+    <!-- ================================================================
+         NOT FOUND SECTION
+         ================================================================ -->
+    <div class="not-found-card" id="notFoundSection">
+      <div class="error-content">
+        <p><strong>We couldn't find an account matching that.</strong></p>
+        <p>A few things to check:</p>
+        <ul>
+          <li><strong>Searched by email?</strong> We may have a different email on file. Try your APA member number instead.</li>
+          <li><strong>Searched by APA #?</strong> Double-check the number — it's on your APA membership card.</li>
+        </ul>
+        <p><strong>Heads up:</strong> Even if you log in with your APA number, confirmation emails go to the address we have on file. If your email needs updating, let us know.</p>
+        <p>Still having trouble? We're happy to help!</p>
+      </div>
+    </div>
+
+    <!-- ================================================================
+         CONFIRMATION MODAL (cancel "are you sure?")
+         ================================================================ -->
+    <div class="modal" id="confirmModal">
+      <div class="modal-panel">
+        <div class="modal-icon modal-icon-warning">?</div>
+        <div class="modal-title">Cancel Registration</div>
+        <div class="modal-message" id="confirmMessage">
+          Are you sure you want to cancel?
+        </div>
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn-dismiss" id="confirmNo" type="button">
+            Never Mind
+          </button>
+          <button class="modal-btn modal-btn-confirm" id="confirmYes" type="button">
+            Yes, Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================
+         INFO MODAL (success notification popup)
+         ================================================================ -->
+    <div class="modal" id="infoModal">
+      <div class="modal-panel">
+        <div class="modal-icon modal-icon-success" id="infoIcon">&#10003;</div>
+        <div class="modal-title" id="infoTitle"></div>
+        <div class="modal-message" id="infoMessage"></div>
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn-ok" id="infoOk" type="button">
+            Got It
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================
+         FOOTER
+         ================================================================ -->
+    <footer>
+      <div>South Portland Metro APA</div>
+    </footer>
+
+  </div><!-- /.page -->
+
+  <script>
+    // ====================================================================
+    // JavaScript - Application Logic
+    // ====================================================================
+
+    // -- Constants & State ------------------------------------------------
+
+    var APP_NAME = 'MultiPass';
+
+    var currentPlayer = null;
+    var qualifiers = [];
+    var registrations = [];
+    // Per-format eligibility status from admin's _Eligibility sheet.
+    // Keyed by format ("8" or "9"), values: "eligible" or "ineligible".
+    // Missing keys = pending review. Set by lookupPlayer response.
+    var eligibilityByFormat = {};
+    var pendingConfirm = null;
+
+
+
+    // -- Utility Functions ------------------------------------------------
+
+    // callServer - fetch-based replacement for google.script.run.
+    // Posts JSON to the Cloudflare Worker proxy and returns a Promise
+    // that resolves with the parsed JSON response.
+    var API_URL = 'https://multipass.spmapa.workers.dev';
+
+    function callServer(fn) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      // Build params object based on function name
+      var params = { action: fn };
+
+      if (fn === 'lookupPlayer') {
+        params.input = args[0];
+      } else if (fn === 'registerForQualifier') {
+        params.memberNumber = args[0];
+        params.qualDate = args[1];
+        params.format = args[2];
+      } else if (fn === 'cancelRegistration') {
+        params.memberNumber = args[0];
+        params.qualDate = args[1];
+        params.format = args[2];
+      }
+
+      return fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      }).then(function(response) {
+        if (!response.ok) throw new Error('Network error: ' + response.status);
+        return response.json();
+      });
+    }
+
+    // esc - XSS-safe HTML escape. Identical in PatchCheck, CrewFinder.
+    function esc(s) {
+      var d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+
+    // -- UI Helpers -------------------------------------------------------
+
+    function setStatus(text) {
+      document.getElementById('statusText').textContent = text || '';
+    }
+
+    function showMessage(type, text) {
+      var container = document.getElementById('messageContainer');
+      if (!type || !text) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML =
+        '<div class="msg msg-' + esc(type) + '">' + esc(text) + '</div>';
+    }
+
+    function setLoading(loading) {
+      var btn = document.getElementById('searchBtn');
+      var input = document.getElementById('searchInput');
+      if (loading) {
+        btn.disabled = true;
+        btn.textContent = 'SEARCHING\u2026';
+        input.disabled = true;
+        setStatus('Searching\u2026');
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'FIND ME';
+        input.disabled = false;
+      }
+    }
+
+    function resetUI() {
+      document.getElementById('welcomePill').style.display = 'none';
+      document.getElementById('ineligibleBanner').style.display = 'none';
+      document.getElementById('regSummary').style.display = 'none';
+      document.getElementById('regSummary').classList.remove('expanded');
+      document.getElementById('regSummaryList').innerHTML = '';
+      document.getElementById('qualifierDivider').style.display = 'none';
+      document.getElementById('contactBanner').style.display = 'none';
+      document.getElementById('eligibilityNote').style.display = 'none';
+      document.getElementById('qualifierContainer').innerHTML = '';
+      document.getElementById('qualifierContainer').classList.add('hidden');
+      document.getElementById('notFoundSection').style.display = 'none';
+      showMessage(null, '');
+      setStatus('');
+      eligibilityByFormat = {};
+    }
+
+
+    // -- Confirmation Modal (two-button: Yes, Cancel / Never Mind) --------
+
+    function showConfirmModal(message, onConfirm) {
+      document.getElementById('confirmMessage').textContent = message;
+      pendingConfirm = onConfirm;
+      document.getElementById('confirmModal').style.display = 'flex';
+    }
+
+    function closeConfirmModal() {
+      document.getElementById('confirmModal').style.display = 'none';
+      pendingConfirm = null;
+    }
+
+
+    // -- Info Modal (single-button: OK) -----------------------------------
+    // Used to show success messages after registration or cancellation.
+    // This is a simple notification popup, NOT a confirmation dialog.
+
+    // showInfoModal — Display a single-button info popup.
+    // Supports plain text (default) or HTML content.
+    // PARAMETERS:
+    //   title   — popup title text
+    //   message — body text (plain text, newlines rendered via pre-line)
+    //   opts    — optional { html: string } for HTML content appended
+    //             AFTER the message text. Used for the eligibility review
+    //             callout box that needs distinct visual styling.
+    function showInfoModal(title, message, opts) {
+      document.getElementById('infoTitle').textContent = title;
+      var msgEl = document.getElementById('infoMessage');
+      msgEl.textContent = message;
+      // If opts.html is provided, append it as HTML after the text message.
+      // This allows mixing safe textContent (user-facing copy) with styled
+      // HTML (the amber eligibility callout box).
+      if (opts && opts.html) {
+        msgEl.innerHTML = msgEl.innerHTML + opts.html;
+      }
+      document.getElementById('infoModal').style.display = 'flex';
+    }
+
+    function closeInfoModal() {
+      document.getElementById('infoModal').style.display = 'none';
+    }
+
+
+    // -- Registration Summary Panel ----------------------------------------
+    // Manages the collapsible panel showing which events the player has
+    // registered for. Called after initial lookup and after every
+    // register/cancel action to keep the summary in sync.
+
+    // renderRegSummary — Builds or updates the registration summary panel.
+    // PARAMETERS:
+    //   regs  — array of { qualifierDate, format } objects (player's registrations)
+    //   quals — array of qualifier objects (for location info in expanded items)
+    //   opts  — { animate: boolean } — if true, bounce the count badge
+    //
+    // BEHAVIOR:
+    //   - 0 registrations: panel hidden entirely (no empty state clutter)
+    //   - 1+ registrations: panel visible with count badge and expandable list
+    //   - First time showing (from 0 → 1+): auto-expand the panel
+    //   - Subsequent updates: keep current expand/collapse state
+
+    function renderRegSummary(regs, quals, opts) {
+      var panel = document.getElementById('regSummary');
+      var countEl = document.getElementById('regSummaryCount');
+      var listEl = document.getElementById('regSummaryList');
+      var wasHidden = (panel.style.display === 'none' || panel.style.display === '');
+
+      if (!regs || regs.length === 0) {
+        panel.style.display = 'none';
+        panel.classList.remove('expanded');
+        listEl.innerHTML = '';
+        return;
+      }
+
+      // Build a lookup map from qualifiers for location info and sort order.
+      // qualMap: key → qualifier object (for location/time info)
+      // qualOrder: key → index in the qualifiers array (for sorting)
+      // The qualifiers array comes from the Qualifiers sheet which is already
+      // ordered by date, so the index IS the chronological sort order.
+      var qualMap = {};
+      var qualOrder = {};
+      for (var q = 0; q < quals.length; q++) {
+        var qk = quals[q].dateDisplay + '|' + quals[q].format;
+        qualMap[qk] = quals[q];
+        qualOrder[qk] = q;
+      }
+
+      // Sort registrations to match qualifier date/time order.
+      // This ensures the summary list reads chronologically (earliest first)
+      // rather than in random append order from the Registrations sheet.
+      var sortedRegs = regs.slice().sort(function(a, b) {
+        var keyA = a.qualifierDate + '|' + a.format;
+        var keyB = b.qualifierDate + '|' + b.format;
+        var orderA = qualOrder[keyA] !== undefined ? qualOrder[keyA] : 9999;
+        var orderB = qualOrder[keyB] !== undefined ? qualOrder[keyB] : 9999;
+        return orderA - orderB;
+      });
+
+      // Update count badge
+      countEl.textContent = regs.length;
+      if (opts && opts.animate) {
+        countEl.classList.remove('badge-bounce');
+        // Force reflow to restart animation
+        void countEl.offsetWidth;
+        countEl.classList.add('badge-bounce');
+      }
+
+      // Build list items (using sorted order)
+      listEl.innerHTML = '';
+      for (var i = 0; i < sortedRegs.length; i++) {
+        var reg = sortedRegs[i];
+        var rk = reg.qualifierDate + '|' + reg.format;
+        var qual = qualMap[rk] || {};
+
+        var item = document.createElement('div');
+        item.className = 'reg-summary-item';
+
+        var formatDisplay = reg.format === '8' ? '8-Ball' : reg.format === '9' ? '9-Ball' : reg.format;
+        var formatClass = reg.format === '8' ? 'format-8' : 'format-9';
+
+        item.innerHTML =
+          '<span class="reg-summary-format ' + formatClass + '">' + esc(formatDisplay) + '</span>' +
+          '<div class="reg-summary-details">' +
+            '<div class="reg-summary-date">' + esc(reg.qualifierDate) + '</div>' +
+            '<div class="reg-summary-location">' + esc(qual.locationName || '') + '</div>' +
+          '</div>';
+
+        // Tap item → scroll to corresponding qualifier card
+        (function(qualDate, format) {
+          item.addEventListener('click', function() {
+            scrollToQualCard(qualDate, format);
+          });
+        })(reg.qualifierDate, reg.format);
+
+        listEl.appendChild(item);
+      }
+
+      // Show panel
+      panel.style.display = 'block';
+
+      // Auto-expand when going from hidden → visible (first registration),
+      // otherwise preserve current expand/collapse state
+      if (wasHidden) {
+        panel.classList.add('expanded');
+      }
+    }
+
+    // scrollToQualCard — Scrolls to and briefly highlights the qualifier card
+    // matching the given date + format. Called when tapping a summary item.
+    function scrollToQualCard(qualDate, format) {
+      var container = document.getElementById('qualifierContainer');
+      var cards = container.querySelectorAll('.qual-card');
+      for (var i = 0; i < cards.length; i++) {
+        // Match by checking the card's data attributes
+        if (cards[i].dataset.qualDate === qualDate && cards[i].dataset.format === format) {
+          cards[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Brief highlight pulse
+          cards[i].style.transition = 'box-shadow 0.3s';
+          cards[i].style.boxShadow = '0 0 0 4px rgba(0, 49, 161, 0.4)';
+          setTimeout(function(card) {
+            card.style.boxShadow = '';
+          }.bind(null, cards[i]), 800);
+          break;
+        }
+      }
+    }
+
+    // toggleRegSummary — Expand/collapse the summary panel body.
+    function toggleRegSummary() {
+      var panel = document.getElementById('regSummary');
+      panel.classList.toggle('expanded');
+    }
+
+
+    // -- Search Handler ---------------------------------------------------
+
+    async function handleSearch() {
+      var input = document.getElementById('searchInput');
+      var raw = (input.value || '').trim();
+
+      if (!raw) {
+        showMessage('error', 'Please enter your email address or APA number.');
+        input.focus();
+        return;
+      }
+
+      resetUI();
+      setLoading(true);
+
+      try {
+        var data = await callServer('lookupPlayer', raw);
+
+        if (!data || data.success === false) {
+          showMessage('error', (data && data.error) || 'Lookup failed. Please try again.');
+          setStatus('');
+          return;
+        }
+
+        if (data.found && data.eligible) {
+          // ELIGIBLE — hide search, show welcome + qualifiers + summary
+          currentPlayer = data.player;
+          currentPlayer.eligible = true;
+          qualifiers = data.qualifiers || [];
+          registrations = data.registrations || [];
+          eligibilityByFormat = data.eligibilityByFormat || {};
+
+          // Persist the lookup input so returning players don't have to
+          // re-enter it. sessionStorage clears when the browser tab closes
+          // (not persisted across sessions — appropriate for a shared/public
+          // device use case like a pool hall kiosk).
+          try {
+            sessionStorage.setItem('multipass_lastInput', raw);
+          } catch (e) {
+            // sessionStorage not available (private browsing, etc.) — ignore.
+          }
+
+          // Search form stays visible on ALL devices after lookup.
+          // Couples/teammates sharing a device need to search for
+          // different people without reloading. Not a login system.
+
+          // Clear the search input after successful lookup. The welcome
+          // pill shows the player name, so the raw input (email/APA#) is
+          // no longer needed. On desktop the search bar stays visible for
+          // a different person — clearing it signals "ready for next search."
+          document.getElementById('searchInput').value = '';
+
+          var pill = document.getElementById('welcomePill');
+          pill.textContent = 'Welcome, ' + (data.player.firstName || '') + ' ' + (data.player.lastName || '') + '!';
+          pill.style.display = 'block';
+
+          // On desktop, the qualifier count is redundant — all cards are
+          // visible on screen. Only show it on mobile/tablet where the
+          // user can't see all cards at once.
+          if (!document.body.classList.contains('desktop')) {
+            setStatus(qualifiers.length + ' qualifier' + (qualifiers.length !== 1 ? 's' : '') + ' available');
+          }
+
+          renderQualifiers(qualifiers, registrations, true);
+
+          // Render registration summary (if player has any existing registrations)
+          renderRegSummary(registrations, qualifiers, { animate: false });
+
+        } else if (data.found && !data.eligible) {
+          // INELIGIBLE — keep search form visible so player can try another lookup
+          currentPlayer = data.player;
+          currentPlayer.eligible = false;
+
+          // Show welcome pill with name
+          var pill = document.getElementById('welcomePill');
+          pill.textContent = (data.player.firstName || '') + ' ' + (data.player.lastName || '');
+          pill.style.display = 'block';
+
+          document.getElementById('ineligibleBanner').style.display = 'block';
+
+          setStatus('');
+
+        } else {
+          // NOT FOUND — keep search form visible
+          document.getElementById('notFoundSection').style.display = 'block';
+          setStatus('');
+        }
+
+      } catch (err) {
+        showMessage('error', 'Something went wrong. Please try again.');
+        setStatus('');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+
+    // -- Qualifier Rendering ----------------------------------------------
+
+    // buildQualCard — Creates a single qualifier card DOM element.
+    // Extracted from renderQualifiers so both the standard loop and the
+    // weekend-pairing desktop layout can build cards the same way.
+    //
+    // PARAMETERS:
+    //   q        — qualifier object from server
+    //   i        — index in the qualifiers array (used for card ID + handlers)
+    //   regSet   — { "dateDisplay|format": true } lookup for registered events
+    //   eligible — boolean, whether the player can register
+    //
+    // RETURNS: HTMLElement (the .qual-card div)
+
+    function buildQualCard(q, i, regSet, eligible) {
+      var qKey = q.dateDisplay + '|' + q.format;
+      var isRegistered = !!regSet[qKey];
+
+      var card = document.createElement('div');
+      card.className = 'qual-card';
+      card.id = 'card-' + i;
+      card.dataset.qualDate = q.dateDisplay;
+      card.dataset.format = q.format;
+
+      // Apply eligibility-colored card state when registered.
+      // Card border/bg color reflects admin eligibility status:
+      //   confirmed → green, ineligible → red, pending → amber
+      var eligState = eligibilityByFormat[q.format] || '';
+      var eligCardClass = eligState === 'eligible' ? 'card-elig-confirmed'
+        : eligState === 'ineligible' ? 'card-elig-ineligible'
+        : 'card-elig-pending';
+
+      if (q.isClosed && isRegistered) {
+        card.classList.add('card-registered', eligCardClass);
+        card.classList.add('card-closed');
+      } else if (q.isClosed) {
+        card.classList.add('card-closed');
+      } else if (isRegistered) {
+        card.classList.add('card-registered', eligCardClass);
+      }
+      if (!eligible) {
+        card.classList.add('card-disabled');
+      }
+
+      var formatClass = q.format === '8' ? 'format-8' : 'format-9';
+
+      // On desktop/tablet, strip day name from dateDisplay since column
+      // headers already show "SATURDAY" / "SUNDAY". "Saturday, March 21"
+      // becomes "March 21". On mobile, keep the full string.
+      var isDesktop = document.body.classList.contains('desktop') ||
+                      document.body.classList.contains('tablet');
+      var displayDate = q.dateDisplay;
+      if (isDesktop) {
+        var commaPos = q.dateDisplay.indexOf(', ');
+        if (commaPos !== -1) {
+          displayDate = q.dateDisplay.substring(commaPos + 2);
+        }
+      }
+
+      // Location name links to Google Maps using the address from the
+      // spreadsheet. Opens in new tab. Address line removed from card —
+      // the link provides access to the full address + directions.
+      var mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' +
+        encodeURIComponent(q.locationName + ', ' + q.locationAddress);
+
+      // -- Eligibility badge --
+      // Shows admin-set eligibility status for this card's format.
+      // Reads from the global eligibilityByFormat (populated by lookupPlayer).
+      // Three states:
+      //   - Not in map (undefined) → "Pending Review" (amber)
+      //   - "eligible"             → "Eligible" (green)
+      //   - "ineligible"           → "Ineligible" (red)
+      // Only shown for registered or eligible players (the `eligible` param).
+      var eligState = eligibilityByFormat[q.format] || '';
+      var eligBadgeHtml = '';
+      if (eligible && isRegistered) {
+        // Show eligibility on cards the player is registered for
+        if (eligState === 'eligible') {
+          eligBadgeHtml = '<span class="elig-badge elig-eligible">Eligibility Confirmed</span>';
+        } else if (eligState === 'ineligible') {
+          eligBadgeHtml = '<span class="elig-badge elig-ineligible">Not Eligible</span>';
+        } else {
+          eligBadgeHtml = '<span class="elig-badge elig-pending">Eligibility Pending</span>';
+        }
+      }
+
+      card.innerHTML =
+        '<div class="qual-date">' + esc(displayDate) + '</div>' +
+        '<span class="format-badge ' + formatClass + '">' + esc(q.formatDisplay) + '</span>' +
+        '<div class="qual-time">' + esc(q.timeDisplay) + '</div>' +
+        '<a class="qual-location" href="' + esc(mapsUrl) + '" target="_blank" rel="noopener">' + esc(q.locationName) + '</a>' +
+        eligBadgeHtml;
+
+      var btn = document.createElement('button');
+      btn.className = 'register-btn';
+      btn.type = 'button';
+
+      // Format-specific cancel class: 8-ball = red (default), 9-ball = blue
+      var cancelClass = q.format === '9' ? 'btn-cancel btn-cancel-9' : 'btn-cancel';
+
+      if (q.isClosed && isRegistered && eligible) {
+        btn.textContent = 'Closed \u2014 Cancel';
+        btn.classList.add('btn-closed-cancel');
+        btn.addEventListener('click', (function(qualDate, format, cardIdx) {
+          return function() { handleCancel(qualDate, format, cardIdx); };
+        })(q.dateDisplay, q.format, i));
+      } else if (q.isClosed) {
+        btn.textContent = 'Closed';
+        btn.classList.add('btn-closed');
+        btn.disabled = true;
+      } else if (!eligible) {
+        btn.textContent = 'Register';
+        btn.disabled = true;
+      } else if (isRegistered) {
+        btn.textContent = 'Cancel';
+        btn.className += ' ' + cancelClass;
+        btn.addEventListener('click', (function(qualDate, format, cardIdx) {
+          return function() { handleCancel(qualDate, format, cardIdx); };
+        })(q.dateDisplay, q.format, i));
+      } else {
+        btn.textContent = 'Register';
+        btn.addEventListener('click', (function(qualDate, format, cardIdx) {
+          return function() { handleRegister(qualDate, format, cardIdx); };
+        })(q.dateDisplay, q.format, i));
+      }
+
+      card.appendChild(btn);
+      return card;
+    }
+
+    // buildEmptySlot — Creates a placeholder card for an empty weekend slot.
+    // Used on desktop when a Saturday has no adjacent Sunday event (or vice
+    // versa). The placeholder fills the grid cell so the layout stays aligned.
+    //
+    // dateLabel: full date string like "Sunday, March 22" so users see the
+    // specific date that has no qualifier, not just a vague day name.
+    // The adjacent date is computed by getAdjacentDate() from the paired
+    // qualifier's dateDisplay.
+    function buildEmptySlot(dateLabel) {
+      var slot = document.createElement('div');
+      slot.className = 'qual-card card-empty';
+      // Strip day name on desktop/tablet — column headers already say
+      // Saturday/Sunday. "Sunday, March 22" → "March 22".
+      var displayLabel = dateLabel;
+      var commaPos = dateLabel.indexOf(', ');
+      if (commaPos !== -1) {
+        displayLabel = dateLabel.substring(commaPos + 2);
+      }
+      slot.innerHTML = '<div class="qual-date empty-day">' + esc(displayLabel) + '</div>' +
+        '<div class="empty-msg">No qualifier scheduled</div>';
+      return slot;
+    }
+
+    // getAdjacentDate — Given a dateDisplay like "Saturday, March 21",
+    // compute the adjacent day's full date string. direction is +1 (next day)
+    // or -1 (previous day).
+    //
+    // Example: getAdjacentDate("Saturday, March 21", +1) → "Sunday, March 22"
+    //          getAdjacentDate("Sunday, March 29", -1)  → "Saturday, March 28"
+    //
+    // Uses JS Date math to handle month boundaries correctly (e.g., March 31 → April 1).
+    // The months array and day-name lookup mirror the server's dateDisplay format
+    // so the empty slot label matches real qualifier card labels exactly.
+    function getAdjacentDate(dateDisplay, direction) {
+      // dateDisplay format: "DayName, MonthName DD"
+      // Parse it into components.
+      var months = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+      var dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+      // Split "Saturday, March 21" → ["Saturday", " March 21"]
+      var commaIdx = dateDisplay.indexOf(',');
+      if (commaIdx === -1) return dateDisplay; // fallback: can't parse
+
+      var rest = dateDisplay.substring(commaIdx + 1).trim(); // "March 21"
+      var parts = rest.split(' '); // ["March", "21"]
+      if (parts.length < 2) return dateDisplay; // fallback
+
+      var monthName = parts[0];
+      var day = parseInt(parts[1], 10);
+
+      // Find month index (0-based).
+      var monthIdx = -1;
+      for (var m = 0; m < months.length; m++) {
+        if (months[m] === monthName) { monthIdx = m; break; }
+      }
+      if (monthIdx === -1) return dateDisplay; // fallback
+
+      // Create a Date object for the given date. Year doesn't matter for
+      // day-name computation, but use 2026 (current session year) to be safe.
+      var d = new Date(2026, monthIdx, day);
+      // Add direction (+1 or -1 day)
+      d.setDate(d.getDate() + direction);
+
+      // Format back to "DayName, MonthName DD"
+      var newDayName = dayNames[d.getDay()];
+      var newMonthName = months[d.getMonth()];
+      var newDay = d.getDate();
+
+      return newDayName + ', ' + newMonthName + ' ' + newDay;
+    }
+
+
+    function renderQualifiers(quals, regs, eligible) {
+      var container = document.getElementById('qualifierContainer');
+      container.innerHTML = '';
+
+      // On desktop, CSS sets #qualifierContainer to display: grid for
+      // 2-column card layout. An inline style="display: block" would
+      // override that. Instead, use a CSS class to toggle visibility.
+      // resetUI() adds .hidden (display: none !important); here we
+      // remove it, letting the CSS rule (grid on desktop, block default
+      // on mobile) take control.
+      container.classList.remove('hidden');
+      container.style.display = '';
+
+      // Show section divider between summary and cards (mobile only —
+      // tablet/desktop hide it via CSS !important)
+      document.getElementById('qualifierDivider').style.display = 'flex';
+
+      // Show contact banner between divider and eligibility note
+      document.getElementById('contactBanner').style.display = 'block';
+
+      // Show eligibility note (10-score requirement)
+      document.getElementById('eligibilityNote').style.display = 'block';
+
+      if (quals.length === 0) {
+        container.innerHTML = '<div class="msg msg-info">No qualifier events are currently scheduled.</div>';
+        return;
+      }
+
+      var regSet = {};
+      for (var r = 0; r < regs.length; r++) {
+        var key = regs[r].qualifierDate + '|' + regs[r].format;
+        regSet[key] = true;
+      }
+
+      // -- Desktop weekend-paired layout --
+      // On desktop/tablet, pair Saturday + adjacent Sunday into rows.
+      // Saturday always goes in the left column, Sunday in the right.
+      // If a Saturday has no adjacent Sunday (or vice versa), insert
+      // a placeholder "No qualifier scheduled" card.
+      //
+      // On mobile, just render cards sequentially (no pairing).
+
+      var isDesktopLayout = document.body.classList.contains('desktop') ||
+                            document.body.classList.contains('tablet');
+
+      if (isDesktopLayout) {
+        // -- Column Headers --
+        // Add "Saturday" and "Sunday" labels as the first row of the
+        // 2-column grid. These provide clear context: each column is
+        // a specific day of the weekend. Users were confused by empty
+        // placeholder slots without these headers.
+        var satHeader = document.createElement('div');
+        satHeader.className = 'grid-col-header';
+        satHeader.textContent = 'Saturday';
+        container.appendChild(satHeader);
+
+        var sunHeader = document.createElement('div');
+        sunHeader.className = 'grid-col-header';
+        sunHeader.textContent = 'Sunday';
+        container.appendChild(sunHeader);
+
+        // -- Weekend Pairing --
+        // Group qualifiers into weekend pairs.
+        // Strategy: walk through quals (already sorted chronologically).
+        // dateDisplay starts with day name: "Saturday, March 21" or
+        // "Sunday, March 29". Extract the day name from the start.
+        //
+        // Algorithm:
+        //   - If current is Saturday, peek at next: if it's Sunday and
+        //     adjacent (date is +1 day), pair them. Otherwise, Saturday
+        //     gets an empty Sunday slot with computed date.
+        //   - If current is Sunday (not consumed by a previous Saturday),
+        //     it gets an empty Saturday slot on the left with computed date.
+        //
+        // Empty slots show the real date (e.g., "Sunday, March 22") computed
+        // from the paired qualifier's dateDisplay using getAdjacentDate().
+
+        var idx = 0;
+        while (idx < quals.length) {
+          var q = quals[idx];
+          var isSaturday = q.dateDisplay.indexOf('Saturday') === 0;
+          var isSunday = q.dateDisplay.indexOf('Sunday') === 0;
+
+          if (isSaturday) {
+            // Check if next qualifier is the adjacent Sunday.
+            // "Adjacent" = next entry is Sunday AND is the very next
+            // qualifier in chronological order (they're already sorted).
+            var nextQ = (idx + 1 < quals.length) ? quals[idx + 1] : null;
+            var nextIsSunday = nextQ && nextQ.dateDisplay.indexOf('Sunday') === 0;
+
+            // Build Saturday card (left column)
+            container.appendChild(buildQualCard(q, idx, regSet, eligible));
+
+            if (nextIsSunday) {
+              // Pair: Saturday + Sunday
+              container.appendChild(buildQualCard(nextQ, idx + 1, regSet, eligible));
+              idx += 2;
+            } else {
+              // Saturday alone — compute what Sunday's date would be (+1 day)
+              var adjacentSunday = getAdjacentDate(q.dateDisplay, +1);
+              container.appendChild(buildEmptySlot(adjacentSunday));
+              idx += 1;
+            }
+
+          } else if (isSunday) {
+            // Orphan Sunday (no preceding Saturday consumed it)
+            // Compute what Saturday's date would be (-1 day)
+            var adjacentSaturday = getAdjacentDate(q.dateDisplay, -1);
+            container.appendChild(buildEmptySlot(adjacentSaturday));
+            container.appendChild(buildQualCard(q, idx, regSet, eligible));
+            idx += 1;
+
+          } else {
+            // Non-weekend day (Friday, etc.) — just render normally.
+            // This shouldn't happen with current qualifier data but
+            // handles it gracefully if the schedule changes.
+            container.appendChild(buildQualCard(q, idx, regSet, eligible));
+            idx += 1;
+          }
+        }
+
+      } else {
+        // Mobile: simple sequential render, no pairing.
+        for (var i = 0; i < quals.length; i++) {
+          container.appendChild(buildQualCard(quals[i], i, regSet, eligible));
+        }
+      }
+    }
+
+    function updateCardState(cardIdx, isRegistered, qualDate, format) {
+      var card = document.getElementById('card-' + cardIdx);
+      if (!card) return;
+
+      // Look up the qualifier to check isClosed status.
+      // Needed for post-cancel rendering: if the qualifier is closed and
+      // the player just cancelled, the card should show "Closed" (disabled),
+      // not "Register" (which would be misleading since cutoff has passed).
+      var qual = null;
+      for (var q = 0; q < qualifiers.length; q++) {
+        if (qualifiers[q].dateDisplay === qualDate && qualifiers[q].format === format) {
+          qual = qualifiers[q];
+          break;
+        }
+      }
+      var isClosed = qual ? qual.isClosed : false;
+
+      // Update card classes: remove all state classes first, then re-apply.
+      // Eligibility color class reflects admin status for this format.
+      card.classList.remove('card-registered', 'card-closed',
+        'card-elig-confirmed', 'card-elig-ineligible', 'card-elig-pending');
+
+      var eligState = eligibilityByFormat[format] || '';
+      var eligCardClass = eligState === 'eligible' ? 'card-elig-confirmed'
+        : eligState === 'ineligible' ? 'card-elig-ineligible'
+        : 'card-elig-pending';
+
+      if (isClosed && isRegistered) {
+        card.classList.add('card-registered', eligCardClass);
+        card.classList.add('card-closed');
+      } else if (isClosed) {
+        card.classList.add('card-closed');
+      } else if (isRegistered) {
+        card.classList.add('card-registered', eligCardClass);
+      }
+
+      // -- Update eligibility badge --
+      // When transitioning to registered, add the "Pending Review" badge.
+      // When cancelling, remove it. The badge is part of the card's inner
+      // HTML from buildQualCard, but updateCardState only rebuilds the button,
+      // so we must add/remove the badge explicitly for state transitions.
+      var oldBadge = card.querySelector('.elig-badge');
+      if (isRegistered && !oldBadge) {
+        // Player just registered — create badge reflecting ACTUAL eligibility
+        // state from eligibilityByFormat, not hardcoded to pending.
+        var badge = document.createElement('span');
+        if (eligState === 'eligible') {
+          badge.className = 'elig-badge elig-eligible';
+          badge.textContent = 'Eligibility Confirmed';
+        } else if (eligState === 'ineligible') {
+          badge.className = 'elig-badge elig-ineligible';
+          badge.textContent = 'Not Eligible';
+        } else {
+          badge.className = 'elig-badge elig-pending';
+          badge.textContent = 'Eligibility Pending';
+        }
+        card.appendChild(badge);
+      } else if (isRegistered && oldBadge) {
+        // Badge exists but may reflect stale state — update it to match
+        // the current eligibilityByFormat value.
+        oldBadge.classList.remove('elig-eligible', 'elig-ineligible', 'elig-pending');
+        if (eligState === 'eligible') {
+          oldBadge.classList.add('elig-eligible');
+          oldBadge.textContent = 'Eligibility Confirmed';
+        } else if (eligState === 'ineligible') {
+          oldBadge.classList.add('elig-ineligible');
+          oldBadge.textContent = 'Not Eligible';
+        } else {
+          oldBadge.classList.add('elig-pending');
+          oldBadge.textContent = 'Eligibility Pending';
+        }
+      } else if (!isRegistered && oldBadge) {
+        // Player cancelled — remove badge
+        card.removeChild(oldBadge);
+      }
+
+      var oldBtn = card.querySelector('.register-btn');
+      if (oldBtn) card.removeChild(oldBtn);
+
+      var btn = document.createElement('button');
+      btn.className = 'register-btn';
+      btn.type = 'button';
+
+      // Format-specific cancel class: 8-ball = red (default), 9-ball = blue
+      var cancelClass = format === '9' ? 'btn-cancel btn-cancel-9' : 'btn-cancel';
+
+      if (isClosed && isRegistered) {
+        // Closed but registered — allow cancellation with muted button.
+        btn.textContent = 'Closed \u2014 Cancel';
+        btn.classList.add('btn-closed-cancel');
+        btn.addEventListener('click', (function(qd, fmt, ci) {
+          return function() { handleCancel(qd, fmt, ci); };
+        })(qualDate, format, cardIdx));
+      } else if (isClosed) {
+        // Closed and not registered — fully disabled.
+        btn.textContent = 'Closed';
+        btn.classList.add('btn-closed');
+        btn.disabled = true;
+      } else if (isRegistered) {
+        btn.textContent = 'Cancel';
+        btn.className += ' ' + cancelClass;
+        btn.addEventListener('click', (function(qd, fmt, ci) {
+          return function() { handleCancel(qd, fmt, ci); };
+        })(qualDate, format, cardIdx));
+      } else {
+        btn.textContent = 'Register';
+        btn.addEventListener('click', (function(qd, fmt, ci) {
+          return function() { handleRegister(qd, fmt, ci); };
+        })(qualDate, format, cardIdx));
+      }
+
+      card.appendChild(btn);
+    }
+
+
+    // -- Refresh Qualifiers ------------------------------------------------
+    // Re-fetches qualifiers + registrations from the server and re-renders
+    // all cards with current cutoff states. Called after a failed registration
+    // or cancellation attempt — the failure likely means the server state
+    // has diverged from the client (e.g., cutoff passed while the player
+    // had the app open). Also called by the cancel handler for the same
+    // reason. Also called by cutoff timers when a cutoff time arrives.
+    //
+    // This is a "silent" refresh — no loading spinner, no status change.
+    // The error popup is already showing; this just fixes the cards behind it.
+
+    async function refreshQualifiers() {
+      if (!currentPlayer) return;
+      try {
+        var data = await callServer('lookupPlayer',
+          currentPlayer.email || currentPlayer.memberNumber
+        );
+        if (data && data.success && data.found && data.eligible) {
+          qualifiers = data.qualifiers || [];
+          registrations = data.registrations || [];
+          eligibilityByFormat = data.eligibilityByFormat || {};
+          if (!document.body.classList.contains('desktop')) {
+            setStatus(qualifiers.length + ' qualifier' + (qualifiers.length !== 1 ? 's' : '') + ' available');
+          }
+          renderQualifiers(qualifiers, registrations, true);
+          renderRegSummary(registrations, qualifiers, { animate: false });
+        }
+      } catch (e) {
+        // Silent — the error popup is already visible. If the refresh
+        // itself fails (network down), the stale cards are acceptable.
+      }
+    }
+
+
+    // -- Registration Handlers --------------------------------------------
+
+    // Guard against duplicate submissions from rapid taps on slow devices.
+    // On older phones, the browser event loop can queue multiple onclick
+    // events before JavaScript runs to disable the button. This flag is
+    // checked synchronously at the top of the handler — if a second call
+    // arrives while the first is still in-flight, it's rejected instantly.
+    // Belt-and-suspenders with server-side LockService (2026-02-24).
+    var _registerInFlight = {};
+
+    // -- Global Button Lock --------------------------------------------------
+    // When ANY registration or cancellation is in-flight, ALL register/cancel
+    // buttons across all qualifier cards are disabled. This prevents:
+    //   1. Double-registrations from clicking multiple cards rapidly
+    //   2. Registering for one event while another is still processing
+    //   3. Race conditions between register + cancel on different cards
+    //
+    // The lock is released by the natural re-render paths: updateCardState()
+    // and refreshQualifiers() both rebuild button DOM from scratch, so new
+    // buttons are created in the correct enabled/disabled state.
+    // lockAllRegisterButtons_() is a one-way lock — there is no explicit
+    // "unlock" function. Re-rendering IS the unlock.
+
+    function lockAllRegisterButtons_() {
+      var buttons = document.querySelectorAll('.register-btn');
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].disabled = true;
+      }
+    }
+
+    // Re-enable all register/cancel buttons that should be interactive.
+    // Called after a successful register/cancel where updateCardState()
+    // only rebuilds ONE card's button. The other cards' buttons were
+    // disabled by lockAllRegisterButtons_() and need to be restored.
+    //
+    // Skips buttons that are legitimately disabled:
+    //   - .btn-closed: "Closed" buttons (cutoff passed, not registered)
+    // All other buttons (Register, Cancel, Closed-Cancel) should be tappable.
+    function unlockAllRegisterButtons_() {
+      var buttons = document.querySelectorAll('.register-btn');
+      for (var i = 0; i < buttons.length; i++) {
+        if (!buttons[i].classList.contains('btn-closed')) {
+          buttons[i].disabled = false;
+        }
+      }
+    }
+
+    async function handleRegister(qualDate, format, cardIdx) {
+      if (!currentPlayer) return;
+
+      // Dedupe key: member + qualifier + format. Prevents duplicate
+      // submissions even if the same player has the app open in two tabs
+      // on the same device (sessionStorage is tab-scoped but this guard
+      // is per-tab, which is the best we can do client-side).
+      var dedupeKey = currentPlayer.memberNumber + '|' + qualDate + '|' + format;
+      if (_registerInFlight[dedupeKey]) return;
+      _registerInFlight[dedupeKey] = true;
+
+      // Lock ALL register/cancel buttons across all cards while this
+      // registration is in-flight. Prevents clicking other cards during
+      // the server round-trip. Buttons are re-created (unlocked) when
+      // updateCardState() or refreshQualifiers() re-renders the cards.
+      lockAllRegisterButtons_();
+
+      var card = document.getElementById('card-' + cardIdx);
+      var btn = card ? card.querySelector('.register-btn') : null;
+      if (btn) {
+        btn.textContent = 'REGISTERING\u2026';
+        btn.classList.add('btn-loading');
+      }
+
+      try {
+        var data = await callServer(
+          'registerForQualifier',
+          currentPlayer.memberNumber,
+          qualDate,
+          format
+        );
+
+        if (!data || data.success === false) {
+          // Show server-side errors (cutoff closed, duplicate, etc.) as popup
+          // instead of banner — popups are more visible and match the success UX.
+          showInfoModal(
+            'Registration Failed',
+            (data && data.error) || 'Registration failed. Please try again.'
+          );
+          // Clear in-flight flag so the user can retry after a legitimate failure.
+          delete _registerInFlight[dedupeKey];
+          // Re-fetch all qualifiers to update button states (e.g., cutoff
+          // may have passed while the player had the app open — all cards
+          // need to reflect current server state, not stale client state).
+          refreshQualifiers();
+          return;
+        }
+
+        // Success - update card, summary, and show popup.
+        // Do NOT clear _registerInFlight — the registration succeeded,
+        // so there's no reason to allow re-submitting for this qualifier.
+        registrations = data.registrations || [];
+        showMessage(null, '');
+        updateCardState(cardIdx, true, qualDate, format);
+
+        // Unlock all OTHER cards' buttons. updateCardState() rebuilt the
+        // clicked card's button (fresh DOM, correct state), but the other
+        // cards are still disabled from lockAllRegisterButtons_(). This
+        // restores them to their correct interactive state.
+        unlockAllRegisterButtons_();
+
+        // Update registration summary panel
+        renderRegSummary(registrations, qualifiers, { animate: true });
+
+        // Show success popup with qualifier details + eligibility callout.
+        // The \n inserts a visible line break between the event line
+        // and the email note (modal-message has white-space: pre-line).
+        // The HTML callout reflects the ACTUAL eligibility state — if the
+        // admin already confirmed or denied before the player registered,
+        // the message should match, not always say "pending."
+        var formatName = format === '8' ? '8-Ball' : '9-Ball';
+        var eligForFormat = eligibilityByFormat[format] || '';
+        var eligCalloutHtml = '';
+        if (eligForFormat === 'eligible') {
+          eligCalloutHtml =
+            '<div style="background: #d4edda; border: 1px solid #28a745; border-radius: 10px; ' +
+              'padding: 12px 14px; margin-top: 14px; text-align: center;">' +
+              '<div style="font-weight: 700; color: #155724; font-size: 0.95em;">&#10003; Eligibility Confirmed</div></div>';
+        } else if (eligForFormat === 'ineligible') {
+          eligCalloutHtml =
+            '<div style="background: #f8d7da; border: 1px solid #dc3545; border-radius: 10px; ' +
+              'padding: 12px 14px; margin-top: 14px; text-align: center;">' +
+              '<div style="font-weight: 700; color: #721c24; font-size: 0.95em;">&#10005; Not Eligible</div>' +
+              '<div style="color: #721c24; font-size: 0.85em; margin-top: 4px;">Contact us if you believe this is an error.</div></div>';
+        } else {
+          eligCalloutHtml =
+            '<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 10px; ' +
+              'padding: 12px 14px; margin-top: 14px; text-align: center;">' +
+              '<div style="font-weight: 700; color: #856404; font-size: 0.95em;">&#9888;&#65039; Eligibility Pending</div>' +
+              '<div style="color: #856404; font-size: 0.85em; margin-top: 4px;">Your eligibility still needs to be reviewed.</div>' +
+              '<div style="color: #856404; font-size: 0.85em; margin-top: 2px;">Check back here for updates.</div></div>';
+        }
+        showInfoModal(
+          'You\'re Registered!',
+          formatName + ' qualifier on ' + qualDate + '.\nA confirmation email has been sent to your address on file.',
+          { html: eligCalloutHtml }
+        );
+
+      } catch (err) {
+        // Network/unexpected errors also shown as popup.
+        showInfoModal(
+          'Registration Failed',
+          'Registration failed. Please try again.'
+        );
+        // Clear in-flight flag so the user can retry.
+        delete _registerInFlight[dedupeKey];
+        // Refresh all cards to reflect current server state.
+        // refreshQualifiers() re-renders ALL cards from scratch,
+        // which naturally unlocks buttons (new DOM = fresh state).
+        refreshQualifiers();
+      }
+    }
+
+    async function handleCancel(qualDate, format, cardIdx) {
+      if (!currentPlayer) return;
+
+      showConfirmModal(
+        'Are you sure you want to cancel your registration?',
+        async function() {
+          // Lock ALL register/cancel buttons across all cards while this
+          // cancellation is in-flight. Same pattern as handleRegister —
+          // buttons are re-created (unlocked) by updateCardState() or
+          // refreshQualifiers() when the server responds.
+          lockAllRegisterButtons_();
+
+          var card = document.getElementById('card-' + cardIdx);
+          var btn = card ? card.querySelector('.register-btn') : null;
+          if (btn) {
+            btn.textContent = 'CANCELLING\u2026';
+            btn.classList.add('btn-loading');
+          }
+
+          try {
+            var data = await callServer(
+              'cancelRegistration',
+              currentPlayer.memberNumber,
+              qualDate,
+              format
+            );
+
+            if (!data || data.success === false) {
+              // Show server-side errors as popup (same pattern as register).
+              showInfoModal(
+                'Cancellation Failed',
+                (data && data.error) || 'Cancellation failed. Please try again.'
+              );
+              // Refresh all cards to reflect current server state.
+              refreshQualifiers();
+              return;
+            }
+
+            // Success - update card, summary, and show popup
+            registrations = data.registrations || [];
+            showMessage(null, '');
+            updateCardState(cardIdx, false, qualDate, format);
+
+            // Unlock all OTHER cards' buttons (same pattern as handleRegister).
+            unlockAllRegisterButtons_();
+
+            // Update registration summary panel
+            renderRegSummary(registrations, qualifiers, { animate: true });
+
+            // Show cancellation confirmation popup.
+            // Same \n line break pattern as registration popup.
+            var formatName = format === '8' ? '8-Ball' : '9-Ball';
+            showInfoModal(
+              'Registration Cancelled',
+              formatName + ' qualifier on ' + qualDate + '.\nA confirmation email has been sent to your address on file.'
+            );
+
+          } catch (err) {
+            // Network/unexpected errors also shown as popup.
+            showInfoModal(
+              'Cancellation Failed',
+              'Cancellation failed. Please try again.'
+            );
+            // Refresh all cards to reflect current server state.
+            // refreshQualifiers() re-renders ALL cards, naturally unlocking buttons.
+            refreshQualifiers();
+          }
+        }
+      );
+    }
+
+
+    // -- Initialization ---------------------------------------------------
+
+    document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('headerTitle').textContent = APP_NAME;
+
+      var form = document.getElementById('searchForm');
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        handleSearch();
+      });
+
+      // Confirmation modal handlers
+      document.getElementById('confirmYes').addEventListener('click', function() {
+        if (pendingConfirm) {
+          var fn = pendingConfirm;
+          closeConfirmModal();
+          fn();
+        }
+      });
+
+      document.getElementById('confirmNo').addEventListener('click', function() {
+        closeConfirmModal();
+      });
+
+      document.getElementById('confirmModal').addEventListener('click', function(e) {
+        if (e.target && e.target.id === 'confirmModal') {
+          closeConfirmModal();
+        }
+      });
+
+      // Info modal handler (OK button + backdrop click)
+      document.getElementById('infoOk').addEventListener('click', function() {
+        closeInfoModal();
+      });
+
+      document.getElementById('infoModal').addEventListener('click', function(e) {
+        if (e.target && e.target.id === 'infoModal') {
+          closeInfoModal();
+        }
+      });
+
+      // Registration summary expand/collapse toggle
+      document.getElementById('regSummaryBar').addEventListener('click', function() {
+        toggleRegSummary();
+      });
+
+      // Auto-lookup from sessionStorage or focus search.
+      {
+        // Check if we have a previous lookup input saved in sessionStorage.
+        // If so, pre-fill the search field and auto-search immediately.
+        // This prevents returning players (same browser tab, page refresh,
+        // or navigating away and back) from having to re-enter their info.
+        // sessionStorage is tab-scoped and clears when the tab closes —
+        // safe for shared devices.
+        var savedInput = null;
+        try {
+          savedInput = sessionStorage.getItem('multipass_lastInput');
+        } catch (e) {
+          // sessionStorage not available — fall through to manual search.
+        }
+
+        if (savedInput) {
+          document.getElementById('searchInput').value = savedInput;
+          handleSearch();
+        } else {
+          document.getElementById('searchInput').focus();
+        }
+      }
+    });
+
+
+    // ====================================================================
+    // DEVICE DETECTION — GAS Responsive UI Standard
+    // ====================================================================
+    // GAS serves HTML inside an iframe whose width does NOT match the
+    // device viewport. CSS @media queries are useless. We use screen.width
+    // (physical device pixels) to detect device category and apply a CSS
+    // class to <body>. All layout switching keys off that class.
+    //
+    // See: Docs/gas-responsive-ui-standard.md
+    //
+    // HISTORY: CSS @media attempted in v28 — broke mobile layout (iframe
+    // always reports wide viewport). Reverted. JS screen.width proven in
+    // UiTest POC (2026-02-23).
+    // ====================================================================
+    (function() {
+      var sw = screen.width;
+      var hasTouch = navigator.maxTouchPoints > 0;
+
+      var deviceClass;
+      if (sw < 768) {
+        // Phones: iPhone (390), Samsung Galaxy (412), Pixel (393)
+        deviceClass = 'mobile';
+      } else if (sw < 1200) {
+        // Tablets: iPad (810-1024), iPad Pro (1024), Android tablets
+        deviceClass = 'tablet';
+      } else {
+        // Desktop monitors/laptops — but catch touch-only large devices
+        if (hasTouch && !window.matchMedia('(pointer: fine)').matches) {
+          deviceClass = 'tablet';
+        } else {
+          deviceClass = 'desktop';
+        }
+      }
+
+      document.body.classList.add(deviceClass);
+    })();
+  </script>
 </body>
 </html>
