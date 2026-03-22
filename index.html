@@ -120,6 +120,16 @@
     .launch-btn { animation: pulse 2.5s ease-in-out infinite; }
     .launch-btn:hover { animation: none; }
   </style>
+  <script>
+    // Facebook in-app browser detection — auto-redirect instead of showing
+    // a launch button (target="_blank" doesn't work in FB's webview).
+    var APP_URL = 'https://script.google.com/macros/s/AKfycbwpC0POf2V-pSKzcdhdC7AdiYGaGVibNfEwHuka07b8Z9QOypMYkqOLrtayiWIR3uJvnQ/exec';
+    var ua = navigator.userAgent || '';
+    if (/FBAN|FBAV|Instagram|Messenger/i.test(ua)) {
+      // In-app browser: redirect immediately
+      window.location.href = APP_URL;
+    }
+  </script>
 </head>
 <body>
   <div class="accent-bar"></div>
@@ -128,11 +138,11 @@
     <div class="logo">MULTIPASS</div>
     <div class="subtitle">South Portland Metro APA</div>
     <div class="tagline">Check your eligibility and register for singles qualifiers</div>
-    <a class="launch-btn"
+    <a class="launch-btn" id="launchBtn"
        href="https://script.google.com/macros/s/AKfycbwpC0POf2V-pSKzcdhdC7AdiYGaGVibNfEwHuka07b8Z9QOypMYkqOLrtayiWIR3uJvnQ/exec"
        target="_blank"
        rel="noopener">
-      Launch MultiPass
+      Launch MULTIPASS
     </a>
   </div>
 
