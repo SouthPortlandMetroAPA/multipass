@@ -156,17 +156,12 @@
     }
 
     /* ── Standalone tablet override ──────────────────────────────────
-       Same problem as mobile: GAS iframe shrinks tablet content, but
-       standalone runs in a real viewport. Tablet scale is larger than
-       mobile (0.55 vs 0.44) because tablets have more room.
-       Weekend-paired 2-column grid is disabled for tablet (JS change)
-       — cards stack vertically like mobile. */
-    body.tablet.standalone .page {
-      transform: scale(0.55);
-      transform-origin: top center;
-      width: calc(100vw / 0.55);
-      margin-left: calc((100vw - (100vw / 0.55)) / 2);
-    }
+       Tablet CSS already uses explicit px values for everything, so
+       transform:scale would fight the max-width:620px centering.
+       Instead, leave the tablet layout as-is — the px values are
+       already reasonable for a real tablet viewport. The only fix
+       needed was removing the weekend-paired grid (JS change above).
+       Weekend grid is desktop-only now — tablet stacks cards like mobile. */
 
     /* -- Page wrapper -----------------------------------------------------
        100vw width + 16px padding = CalendarViewer standard. PatchCheck uses
