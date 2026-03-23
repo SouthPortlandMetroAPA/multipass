@@ -2831,9 +2831,9 @@
             document.body.style.cssText = 'margin:0;padding:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100svh;font-family:system-ui,-apple-system,sans-serif;';
             var box = document.createElement('div');
             box.style.cssText = 'text-align:center;padding:48px 24px;max-width:500px;';
-            box.innerHTML = '<div style="font-size:3rem;font-weight:900;color:#ea002a;margin-bottom:16px;">MultiPass</div>'
-              + '<div style="font-size:1.75rem;font-weight:700;color:#0031a1;margin-bottom:24px;">Under Maintenance</div>'
-              + '<div style="font-size:1rem;color:#888;line-height:1.6;">We\'re updating the system. Please check back shortly.</div>';
+            box.innerHTML = '<div style="font-size:48px;font-weight:900;color:#ea002a;line-height:1.1;margin-bottom:24px;">MultiPass</div>'
+              + '<div style="font-size:20px;font-weight:600;color:#0031a1;text-transform:uppercase;letter-spacing:0.15em;margin-bottom:16px;">Under Maintenance</div>'
+              + '<div style="font-size:15px;color:#888;line-height:1.6;">We\'re making improvements.<br>Check back shortly.</div>';
             document.body.appendChild(box);
             document.body.style.visibility = 'visible';
             return; // Stop all further initialization
