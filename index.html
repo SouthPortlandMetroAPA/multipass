@@ -2807,8 +2807,41 @@
 
     // -- Initialization ---------------------------------------------------
 
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', async function() {
       document.getElementById('headerTitle').textContent = APP_NAME;
+
+      // ── Maintenance mode gate ────────────────────────────────────────
+      // Check if maintenance mode is enabled before rendering anything.
+      // If enabled AND the URL doesn't have the correct ?key= bypass param,
+      // replace the entire page with a maintenance screen.
+      try {
+        var maintResp = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ action: 'getMaintenanceMode' }),
+          redirect: 'follow'
+        }).then(function(r) { return r.json(); });
+
+        if (maintResp.success && maintResp.enabled) {
+          var urlParams = new URLSearchParams(window.location.search);
+          var bypassKey = urlParams.get('key') || '';
+          if (bypassKey !== maintResp.bypassKey) {
+            // Show maintenance screen — replace page content entirely
+            document.body.innerHTML = '';
+            document.body.style.cssText = 'margin:0;padding:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100svh;font-family:system-ui,-apple-system,sans-serif;';
+            var box = document.createElement('div');
+            box.style.cssText = 'text-align:center;padding:48px 24px;max-width:500px;';
+            box.innerHTML = '<div style="font-size:clamp(2rem,1.5rem+2vw,3rem);font-weight:900;color:#ea002a;margin-bottom:16px;">MultiPass</div>'
+              + '<div style="font-size:clamp(1.25rem,1rem+1vw,1.75rem);font-weight:700;color:#0031a1;margin-bottom:24px;">Under Maintenance</div>'
+              + '<div style="font-size:1rem;color:#888;line-height:1.6;">We\'re updating the system. Please check back shortly.</div>';
+            document.body.appendChild(box);
+            return; // Stop all further initialization
+          }
+        }
+      } catch (e) {
+        // If maintenance check fails, let the site load normally
+        // (fail-open — don't block users because the API is down)
+      }
 
       var form = document.getElementById('searchForm');
       form.addEventListener('submit', function(e) {
