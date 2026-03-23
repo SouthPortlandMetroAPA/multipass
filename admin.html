@@ -1,0 +1,2453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+  ============================================================================
+  MultiPass - admin.html (Standalone / GitHub Pages version)
+  ============================================================================
+
+  PURPOSE:
+    Standalone admin dashboard for MultiPass. Replaces the GAS-served
+    Admin.html with a fetch()-based version that runs on GitHub Pages.
+    All API calls go through the Cloudflare Worker CORS proxy.
+
+  AUTHENTICATION:
+    Admin token is read from the URL query parameter: ?admin=<token>
+    If missing or empty, the page shows an error and blocks all UI.
+    The token is passed to every API call as `adminToken`.
+
+  ARCHITECTURE:
+    Standalone build — NO dependency on Google Apps Script runtime.
+    Uses fetch() POST to Cloudflare Worker (multipass.spmapa.workers.dev)
+    which proxies to the GAS doPost endpoint. JSON request/response.
+
+    callServer(action, params) builds the fetch request. The action
+    maps to Api.js doPost routes. Admin token is auto-injected.
+
+  TABS:
+    1. Registrations (default) — event selector, registration table,
+       payment toggles, eligibility circles, cancel, refresh, CSV export
+    2. Qualifiers — maintenance mode toggle, add/edit/delete qualifiers
+
+  RESPONSIVE:
+    STANDALONE approach (NOT GAS iframe):
+    - 16px base font (not 36px)
+    - CSS @media queries for breakpoints (not JS screen.width)
+    - mobile < 768px, tablet 768-1199px, desktop >= 1200px
+    - No zoom hacks, no transform scaling
+
+  BRANDING:
+    Same APA visual identity as all family apps:
+    - --spm-primary: #ea002a (red), --spm-accent: #0031a1 (blue)
+    - Header gradient, 22px radius cards, gradient buttons
+    - system-ui font stack
+
+  MAINTENANCE MODE:
+    This admin page is NOT affected by maintenance mode.
+    Maintenance only gates the player-facing site (index.html).
+
+  ============================================================================
+  -->
+  <title>MultiPass Admin — South Portland Metro APA</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    /* ======================================================================
+       CSS - Standalone Admin Dashboard
+       ======================================================================
+       16px base font. CSS @media queries for responsive breakpoints.
+       Mobile-first: base styles are mobile, min-width queries add
+       tablet/desktop overrides.
+       ====================================================================== */
+
+    :root {
+      /* -- APA branding colors -- */
+      --spm-primary: #ea002a;
+      --spm-accent: #0031a1;
+
+      /* -- Neutral palette -- */
+      --bg: #f5f5f5;
+      --card: #ffffff;
+      --border: #e1e1e1;
+      --text: #1f1f1f;
+      --muted: #888;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    /* -- Page wrapper -- */
+    .page {
+      width: 100%;
+      max-width: 100vw;
+      padding: 12px;
+    }
+
+    /* -- Header (gradient card, branded) -- */
+    header {
+      border-radius: 22px;
+      padding: 16px 16px 14px;
+      color: #fff;
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+      text-align: center;
+      margin-bottom: 12px;
+    }
+
+    .title {
+      font-size: clamp(1.25rem, 1rem + 1vw, 1.75rem);
+      font-weight: 900;
+      line-height: 1.1;
+    }
+
+    .subtitle-group {
+      display: inline-block;
+      margin-top: 4px;
+    }
+
+    .subtitle {
+      font-size: clamp(1.5rem, 1.25rem + 1.25vw, 2.25rem);
+      font-weight: 400;
+      font-style: italic;
+      opacity: 0.95;
+    }
+
+    .admin-pill {
+      display: block;
+      width: 100%;
+      margin-top: 6px;
+      padding: 6px 16px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.25);
+      color: #fff;
+      border: 2px solid rgba(255, 255, 255, 0.7);
+    }
+
+    .header-status {
+      margin: 6px 0 0;
+      font-size: 0.875rem;
+      opacity: 0.9;
+      min-height: 1.3em;
+    }
+
+    /* -- Auth error page -- */
+    .auth-error {
+      text-align: center;
+      padding: 48px 24px;
+    }
+    .auth-error-icon {
+      font-size: 3rem;
+      margin-bottom: 16px;
+    }
+    .auth-error-title {
+      font-size: 1.25rem;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .auth-error-msg {
+      font-size: 0.9375rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* -- Toolbar (refresh + export) -- */
+    .admin-toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .admin-toolbar-btn {
+      flex: 1;
+      padding: 10px 0;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--card);
+      color: var(--text);
+      font-size: 0.875rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+      min-height: 44px;
+    }
+
+    .admin-toolbar-btn:hover {
+      background: var(--bg);
+    }
+
+    .admin-toolbar-btn:active {
+      background: #e0e0e0;
+    }
+
+    .admin-toolbar-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* -- Tab toggle pills -- */
+    .tab-toggle {
+      display: flex;
+      gap: 0;
+      margin-bottom: 12px;
+      background: var(--bg);
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .tab-pill {
+      flex: 1;
+      padding: 10px 0;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.875rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      text-align: center;
+      min-height: 44px;
+    }
+
+    .tab-pill.active {
+      background: var(--spm-accent);
+      color: #fff;
+    }
+
+    /* -- Event selector card -- */
+    .event-selector-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 16px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+      margin-bottom: 12px;
+    }
+
+    .event-selector-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    .event-selector {
+      width: 100%;
+      padding: 10px 36px 10px 12px;
+      font-size: 0.9375rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23888'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 20px;
+      min-height: 44px;
+    }
+
+    .event-selector:focus {
+      border-color: var(--spm-accent);
+      box-shadow: 0 0 0 3px rgba(0, 49, 161, 0.15);
+    }
+
+    /* -- Total summary bar -- */
+    .admin-total-bar {
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      color: #fff;
+      border-radius: 22px;
+      padding: 10px 16px;
+      font-size: 0.875rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+
+    /* -- Event details banner -- */
+    .event-details-banner {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 12px 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    }
+
+    .event-detail-row {
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+
+    .event-detail-row:first-child {
+      font-size: 0.9375rem;
+      margin-bottom: 4px;
+    }
+
+    .event-detail-address {
+      color: var(--muted);
+      font-size: 0.8125rem;
+    }
+
+    /* -- Registration table -- */
+    .reg-table-wrap {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      margin-bottom: 12px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .reg-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      min-width: 500px;
+    }
+
+    .reg-table th {
+      background: var(--bg);
+      font-size: 0.6875rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      padding: 8px 6px;
+      text-align: left;
+      border-bottom: 2px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .reg-table td {
+      padding: 8px 6px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    .reg-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .reg-table .sl-cell {
+      text-align: center;
+      font-weight: 700;
+    }
+
+    /* -- Toggle buttons (Paid) -- */
+    .toggle-btn {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 999px;
+      border: none;
+      font-size: 0.6875rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.2s, color 0.2s;
+      white-space: nowrap;
+      min-height: 32px;
+      min-width: 44px;
+    }
+
+    .toggle-btn.off {
+      background: #e9ecef;
+      color: #6c757d;
+    }
+
+    .toggle-btn.on {
+      background: #28a745;
+      color: #fff;
+    }
+
+    .toggle-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* -- Eligibility circle buttons -- */
+    .elig-circles {
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+      align-items: center;
+    }
+    .elig-circle {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      transition: opacity 0.15s, transform 0.15s;
+      padding: 0;
+      font-family: inherit;
+      line-height: 1;
+    }
+    .elig-circle:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .elig-circle.elig-active {
+      transform: scale(1.15);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    }
+    .elig-circle:not(.elig-active) {
+      opacity: 0.3;
+    }
+    .elig-circle:not(.elig-active):hover:not(:disabled) {
+      opacity: 0.7;
+    }
+    .elig-circle-yes   { background: #28a745; }
+    .elig-circle-no    { background: #dc3545; }
+    .elig-circle-maybe { background: #999; }
+
+    /* -- Eligibility queue toast -- */
+    .elig-queue-toast {
+      display: none;
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      background: #1e40af;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      z-index: 9999;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    }
+    .elig-queue-toast.retrying {
+      background: #b45309;
+    }
+
+    /* -- Cancel registration button -- */
+    .cancel-reg-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1px solid #dc3545;
+      background: transparent;
+      color: #dc3545;
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    .cancel-reg-btn:hover {
+      background: #dc3545;
+      color: #fff;
+    }
+
+    .cancel-reg-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* -- Empty state -- */
+    .admin-empty {
+      text-align: center;
+      padding: 24px 16px;
+      color: var(--muted);
+      font-size: 0.9375rem;
+      font-style: italic;
+    }
+
+    /* -- Loading text -- */
+    .loading-text {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.9375rem;
+      padding: 32px 16px;
+    }
+
+    /* -- Footer -- */
+    .footer {
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin: 24px 0 12px;
+    }
+
+    /* -- Modal overlay -- */
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.58);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+      padding: 16px;
+    }
+
+    .modal-panel {
+      background: #fff;
+      border-radius: 16px;
+      padding: 24px 20px 20px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
+      text-align: center;
+    }
+
+    .modal-title {
+      font-size: 1.125rem;
+      font-weight: 800;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .modal-message {
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      margin-bottom: 20px;
+      color: #555;
+      white-space: pre-line;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .modal-btn {
+      flex: 1;
+      padding: 12px 0;
+      font-size: 0.9375rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity 0.15s;
+      min-height: 48px;
+    }
+
+    .modal-btn:active {
+      opacity: 0.82;
+    }
+
+    .modal-btn-confirm {
+      background: var(--spm-primary);
+      color: #fff;
+    }
+
+    .modal-btn-dismiss {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    /* -- Payment method modal grid -- */
+    .pay-method-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .pay-method-btn {
+      padding: 12px 0;
+      font-size: 0.9375rem;
+      font-weight: 700;
+      border: 2px solid var(--border);
+      border-radius: 999px;
+      background: var(--card);
+      color: var(--text);
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, border-color 0.15s;
+      min-height: 48px;
+    }
+
+    .pay-method-btn:hover {
+      border-color: var(--spm-accent);
+      background: #f0f4ff;
+    }
+
+    .pay-method-btn:active {
+      background: var(--bg);
+      border-color: var(--spm-accent);
+    }
+
+    /* -- Maintenance mode card -- */
+    .maintenance-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 16px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .maintenance-label {
+      font-size: 0.9375rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+
+    .maintenance-label input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+    }
+
+    .bypass-key {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--spm-accent);
+      background: #e8edff;
+      padding: 4px 12px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    /* -- Add Qualifier button -- */
+    .add-qualifier-btn {
+      display: block;
+      width: 100%;
+      padding: 12px 0;
+      border: none;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      color: #fff;
+      font-size: 0.9375rem;
+      font-weight: 800;
+      font-family: inherit;
+      cursor: pointer;
+      margin-bottom: 12px;
+      transition: opacity 0.15s;
+      text-align: center;
+      min-height: 48px;
+    }
+
+    .add-qualifier-btn:active {
+      opacity: 0.82;
+    }
+
+    /* -- Qualifier cards -- */
+    .qualifier-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 16px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+      margin-bottom: 12px;
+    }
+
+    .qualifier-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .qualifier-card-date {
+      font-size: 1rem;
+      font-weight: 800;
+    }
+
+    .format-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.6875rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    .format-badge.fmt-8 {
+      background: var(--spm-primary);
+    }
+
+    .format-badge.fmt-9 {
+      background: var(--spm-accent);
+    }
+
+    .qualifier-card-detail {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      color: #555;
+    }
+
+    .qualifier-card-detail strong {
+      color: var(--text);
+    }
+
+    .qualifier-card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .qual-edit-btn {
+      flex: 1;
+      padding: 8px 0;
+      border: 2px solid var(--spm-accent);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--spm-accent);
+      font-size: 0.8125rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      text-align: center;
+      min-height: 44px;
+    }
+
+    .qual-edit-btn:hover {
+      background: var(--spm-accent);
+      color: #fff;
+    }
+
+    .qual-delete-btn {
+      flex: 1;
+      padding: 8px 0;
+      border: 2px solid #dc3545;
+      border-radius: 999px;
+      background: transparent;
+      color: #dc3545;
+      font-size: 0.8125rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      text-align: center;
+      min-height: 44px;
+    }
+
+    .qual-delete-btn:hover:not(:disabled) {
+      background: #dc3545;
+      color: #fff;
+    }
+
+    .qual-delete-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* -- Qualifier modal form -- */
+    .qual-form-group {
+      margin-bottom: 12px;
+      text-align: left;
+    }
+
+    .qual-form-label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 4px;
+    }
+
+    .qual-form-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      font-size: 0.9375rem;
+      font-family: inherit;
+      background: var(--bg);
+      outline: none;
+      box-sizing: border-box;
+      min-height: 44px;
+    }
+
+    .qual-form-input:focus {
+      border-color: var(--spm-accent);
+      box-shadow: 0 0 0 3px rgba(0, 49, 161, 0.15);
+    }
+
+    .format-toggle {
+      display: flex;
+      gap: 8px;
+    }
+
+    .format-toggle-btn {
+      flex: 1;
+      padding: 10px 0;
+      border: 2px solid var(--border);
+      border-radius: 999px;
+      background: var(--card);
+      color: var(--text);
+      font-size: 0.875rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s, color 0.2s;
+      text-align: center;
+      min-height: 44px;
+    }
+
+    .format-toggle-btn.active-8 {
+      background: var(--spm-primary);
+      border-color: var(--spm-primary);
+      color: #fff;
+    }
+
+    .format-toggle-btn.active-9 {
+      background: var(--spm-accent);
+      border-color: var(--spm-accent);
+      color: #fff;
+    }
+
+    .qual-save-btn {
+      flex: 1;
+      padding: 12px 0;
+      border: none;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+      color: #fff;
+      font-size: 0.9375rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      min-height: 48px;
+    }
+
+    .qual-save-btn:active {
+      opacity: 0.82;
+    }
+
+
+    /* ======================================================================
+       Tablet Overrides (min-width: 768px)
+       ====================================================================== */
+    @media (min-width: 768px) {
+      .page {
+        max-width: 700px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+
+      header {
+        padding: 20px 20px 16px;
+      }
+
+      .admin-toolbar {
+        max-width: 400px;
+        margin: 0 auto 12px;
+      }
+    }
+
+
+    /* ======================================================================
+       Desktop Overrides (min-width: 1200px)
+       ====================================================================== */
+    @media (min-width: 1200px) {
+      .page {
+        max-width: 900px;
+      }
+
+      header {
+        border-radius: 14px;
+        padding: 14px 16px 12px;
+        margin-bottom: 12px;
+      }
+
+      .admin-toolbar-btn:hover {
+        background: var(--bg);
+      }
+
+      .tab-pill:hover:not(.active) {
+        background: rgba(0, 0, 0, 0.05);
+      }
+
+      .modal-panel {
+        max-width: 420px;
+      }
+    }
+
+    /* ======================================================================
+       Pointer-based hover states (mouse/trackpad only)
+       ====================================================================== */
+    @media (hover: hover) and (pointer: fine) {
+      .elig-circle:not(.elig-active):hover:not(:disabled) {
+        opacity: 0.7;
+      }
+    }
+
+  </style>
+</head>
+<body>
+  <div class="page">
+    <!-- ================================================================== -->
+    <!-- Header -->
+    <!-- ================================================================== -->
+    <header>
+      <div class="title">South Portland Metro APA</div>
+      <div class="subtitle-group">
+        <span class="subtitle">MultiPass</span>
+      </div>
+      <div class="admin-pill">Admin Dashboard</div>
+      <div class="header-status" id="statusText"></div>
+    </header>
+
+    <!-- ================================================================== -->
+    <!-- Auth error (shown when admin token is missing) -->
+    <!-- ================================================================== -->
+    <div id="authError" style="display: none;">
+      <div class="auth-error">
+        <div class="auth-error-icon">&#128274;</div>
+        <div class="auth-error-title">Admin Token Required</div>
+        <div class="auth-error-msg">
+          This page requires an admin token.<br>
+          Access it via: admin.html?admin=&lt;token&gt;
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- Main content (hidden until auth passes) -->
+    <!-- ================================================================== -->
+    <div id="mainContent" style="display: none;">
+
+      <!-- Toolbar: Refresh + CSV Export -->
+      <div class="admin-toolbar">
+        <button class="admin-toolbar-btn" id="refreshBtn" onclick="loadAdminData()">&#8635; Refresh</button>
+        <button class="admin-toolbar-btn" id="exportBtn" onclick="exportCsv()">&#8595; Export CSV</button>
+      </div>
+
+      <!-- Tab Toggle: Registrations / Qualifiers -->
+      <div class="tab-toggle">
+        <button class="tab-pill active" id="tabRegistrations" onclick="switchTab('registrations')">Registrations</button>
+        <button class="tab-pill" id="tabQualifiers" onclick="switchTab('qualifiers')">Qualifiers</button>
+      </div>
+
+      <!-- Registrations View (default) -->
+      <div id="registrationsView">
+        <div class="event-selector-card">
+          <div class="event-selector-label">Select Event</div>
+          <select class="event-selector" id="eventSelect" onchange="renderSelectedEvent()">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+
+        <div class="admin-total-bar" id="totalBar" style="display: none;"></div>
+
+        <div id="tableContainer"></div>
+      </div>
+
+      <!-- Qualifiers View (hidden by default) -->
+      <div id="qualifiersView" style="display: none;">
+        <!-- Maintenance mode toggle -->
+        <div class="maintenance-card">
+          <label class="maintenance-label">
+            <input type="checkbox" id="maintenanceCheckbox" onchange="toggleMaintenance()">
+            &#128274; Maintenance Mode
+          </label>
+          <span class="bypass-key" id="bypassKeyDisplay" style="display: none;"></span>
+        </div>
+
+        <!-- Add Qualifier button -->
+        <button class="add-qualifier-btn" onclick="showQualifierModal(null)">+ Add Qualifier</button>
+
+        <!-- Qualifier cards rendered here -->
+        <div id="qualifiersList"></div>
+      </div>
+
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- Confirm Modal (Yes / Never Mind) -->
+    <!-- ================================================================== -->
+    <div class="modal" id="confirmModal">
+      <div class="modal-panel">
+        <div class="modal-title" id="confirmTitle">Confirm</div>
+        <div class="modal-message" id="confirmMessage">Are you sure?</div>
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn-dismiss" id="confirmNo" type="button">Never Mind</button>
+          <button class="modal-btn modal-btn-confirm" id="confirmYes" type="button">Yes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- Payment Method Modal -->
+    <!-- ================================================================== -->
+    <div class="modal" id="payMethodModal">
+      <div class="modal-panel">
+        <div class="modal-title" id="payMethodTitle">Payment Method</div>
+        <div class="modal-message" id="payMethodMessage">How did they pay?</div>
+        <div class="pay-method-grid" id="payMethodGrid">
+          <button class="pay-method-btn" data-method="Cash" type="button">Cash</button>
+          <button class="pay-method-btn" data-method="Venmo" type="button">Venmo</button>
+          <button class="pay-method-btn" data-method="PayPal" type="button">PayPal</button>
+          <button class="pay-method-btn" data-method="CashApp" type="button">CashApp</button>
+          <button class="pay-method-btn" data-method="Zelle" type="button">Zelle</button>
+          <button class="pay-method-btn" data-method="Unknown" type="button">Unknown</button>
+        </div>
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn-dismiss" id="payMethodCancel" type="button">Never Mind</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- Qualifier Add/Edit Modal -->
+    <!-- ================================================================== -->
+    <div class="modal" id="qualifierModal">
+      <div class="modal-panel" style="text-align: left;">
+        <div class="modal-title" id="qualModalTitle" style="text-align: center;">Add Qualifier</div>
+
+        <div class="qual-form-group">
+          <label class="qual-form-label" for="qualStartInput">Start</label>
+          <input type="datetime-local" class="qual-form-input" id="qualStartInput">
+        </div>
+
+        <div class="qual-form-group">
+          <label class="qual-form-label" for="qualEndInput">End</label>
+          <input type="datetime-local" class="qual-form-input" id="qualEndInput">
+        </div>
+
+        <div class="qual-form-group">
+          <label class="qual-form-label">Format</label>
+          <div class="format-toggle">
+            <button type="button" class="format-toggle-btn" id="fmtBtn8" onclick="selectQualFormat('8')">8-Ball</button>
+            <button type="button" class="format-toggle-btn" id="fmtBtn9" onclick="selectQualFormat('9')">9-Ball</button>
+          </div>
+        </div>
+
+        <div class="qual-form-group">
+          <label class="qual-form-label" for="qualLocationName">Location Name</label>
+          <input type="text" class="qual-form-input" id="qualLocationName" placeholder="e.g., Crazy 8's Billiards">
+        </div>
+
+        <div class="qual-form-group">
+          <label class="qual-form-label" for="qualLocationAddress">Location Address</label>
+          <input type="text" class="qual-form-input" id="qualLocationAddress" placeholder="e.g., 123 Main St, Portland, ME">
+        </div>
+
+        <div class="qual-form-group">
+          <label class="qual-form-label" for="qualCutoffInput">Registration Cutoff</label>
+          <input type="datetime-local" class="qual-form-input" id="qualCutoffInput">
+        </div>
+
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn-dismiss" type="button" onclick="closeQualifierModal()">Cancel</button>
+          <button class="qual-save-btn" type="button" onclick="saveQualifier()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Eligibility queue toast -->
+    <div class="elig-queue-toast" id="eligQueueToast"></div>
+
+    <!-- Footer -->
+    <div class="footer">South Portland Metro APA &bull; MultiPass Admin</div>
+  </div>
+
+  <script>
+    // ======================================================================
+    // MultiPass Admin Dashboard — Standalone JavaScript
+    // ======================================================================
+    //
+    // ARCHITECTURE:
+    //   - callServer(action, params) posts JSON to Cloudflare Worker proxy
+    //   - Admin token read from URL ?admin=<token>
+    //   - All admin API calls include adminToken in the JSON body
+    //   - Data cached in `adminData`; UI renders from cache
+    //   - Optimistic UI updates with server confirmation / rollback
+    //
+    // API ROUTES (see Api.js doPost switch):
+    //   getAdminData, togglePrePaid, toggleEligibility,
+    //   adminCancelRegistration, addQualifier, updateQualifier,
+    //   deleteQualifier, setMaintenanceMode
+    //
+    // ======================================================================
+
+
+    // -- Constants --
+    var APP_NAME = 'MultiPass';
+    var API_URL = 'https://multipass.spmapa.workers.dev';
+
+    // -- Admin token from URL --
+    // Read once on page load. If missing, show auth error and block UI.
+    var adminToken = (function() {
+      var params = new URLSearchParams(window.location.search);
+      return params.get('admin') || '';
+    })();
+
+    // -- Server data cache --
+    var adminData = null;
+
+    // -- Pending confirm callback --
+    var pendingConfirm = null;
+
+    // -- Payment method modal callback --
+    var pendingPayMethod = null;
+
+
+    // ======================================================================
+    // API Communication
+    // ======================================================================
+
+    /**
+     * Sends a JSON POST request to the Cloudflare Worker proxy.
+     * Automatically injects the admin token into the payload.
+     *
+     * @param {string} action - the Api.js route name (e.g., 'getAdminData')
+     * @param {Object} [params] - additional parameters merged into the body
+     * @returns {Promise<Object>} parsed JSON response from the server
+     */
+    function callServer(action, params) {
+      var body = Object.assign({ action: action, adminToken: adminToken }, params || {});
+
+      return fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(body),
+        redirect: 'follow'
+      }).then(function(response) {
+        if (!response.ok) throw new Error('Network error: ' + response.status);
+        return response.json();
+      });
+    }
+
+
+    // ======================================================================
+    // Utility Functions
+    // ======================================================================
+
+    /**
+     * XSS-safe HTML escaping. Every dynamic value in innerHTML MUST pass
+     * through this function. No exceptions.
+     */
+    function esc(str) {
+      var div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    /**
+     * Set the header status text.
+     */
+    function setStatus(msg) {
+      document.getElementById('statusText').textContent = msg;
+    }
+
+
+    // ======================================================================
+    // Confirm Modal
+    // ======================================================================
+
+    /**
+     * Shows a branded confirmation modal. When the user clicks Yes,
+     * the onConfirm callback fires. Never Mind dismisses silently.
+     */
+    function showConfirmModal(title, message, yesLabel, onConfirm) {
+      document.getElementById('confirmTitle').textContent = title;
+      document.getElementById('confirmMessage').textContent = message;
+      document.getElementById('confirmYes').textContent = yesLabel;
+      pendingConfirm = onConfirm;
+      document.getElementById('confirmModal').style.display = 'flex';
+    }
+
+    function closeConfirmModal() {
+      document.getElementById('confirmModal').style.display = 'none';
+      pendingConfirm = null;
+    }
+
+
+    // ======================================================================
+    // Payment Method Modal
+    // ======================================================================
+
+    /**
+     * Shows payment method selection modal. Selecting a method calls
+     * the onSelect callback with the method string.
+     */
+    function showPayMethodModal(playerName, onSelect) {
+      document.getElementById('payMethodTitle').textContent = 'Mark ' + playerName + ' as Paid';
+      pendingPayMethod = onSelect;
+      document.getElementById('payMethodModal').style.display = 'flex';
+    }
+
+    function closePayMethodModal() {
+      document.getElementById('payMethodModal').style.display = 'none';
+      pendingPayMethod = null;
+    }
+
+
+    // ======================================================================
+    // Data Loading
+    // ======================================================================
+
+    /**
+     * Fetches all admin data from the server and populates the UI.
+     * Called on page load and when the Refresh button is tapped.
+     */
+    async function loadAdminData() {
+      setStatus('Loading\u2026');
+      document.getElementById('refreshBtn').disabled = true;
+      document.getElementById('exportBtn').disabled = true;
+
+      try {
+        var data = await callServer('getAdminData');
+
+        if (!data || !data.success) {
+          setStatus('Error');
+          document.getElementById('tableContainer').innerHTML =
+            '<div class="admin-empty">' + esc((data && data.error) || 'Failed to load data.') + '</div>';
+          return;
+        }
+
+        adminData = data;
+        setStatus('');
+
+        // Populate event dropdown
+        populateEventDropdown(data.qualifiers);
+
+        // Show total bar
+        var totalBar = document.getElementById('totalBar');
+        totalBar.style.display = '';
+        totalBar.textContent = data.totalRegistrations + ' total registration' +
+          (data.totalRegistrations !== 1 ? 's' : '') + ' across ' +
+          data.qualifiers.length + ' event' + (data.qualifiers.length !== 1 ? 's' : '');
+
+        // Render the first/selected event
+        renderSelectedEvent();
+
+      } catch (err) {
+        setStatus('Error');
+        document.getElementById('tableContainer').innerHTML =
+          '<div class="admin-empty">Failed to load admin data. Please try again.</div>';
+        console.error('loadAdminData error:', err);
+      } finally {
+        document.getElementById('refreshBtn').disabled = false;
+        document.getElementById('exportBtn').disabled = false;
+      }
+    }
+
+
+    // ======================================================================
+    // Event Dropdown
+    // ======================================================================
+
+    /**
+     * Populates the event selector dropdown with qualifier options.
+     * Each option shows: "March 28 — 8-Ball (3 registered)"
+     * Includes a "Pending Eligibility" option at the top.
+     */
+    function populateEventDropdown(qualifiers) {
+      var select = document.getElementById('eventSelect');
+      var previousValue = select.value;
+
+      select.innerHTML = '';
+
+      if (!qualifiers || qualifiers.length === 0) {
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'No upcoming events';
+        select.appendChild(opt);
+        return;
+      }
+
+      // "Pending Eligibility" option — shows unconfirmed players across all events
+      var allPending = countAllPending_(qualifiers);
+      var allOpt = document.createElement('option');
+      allOpt.value = 'ALL';
+      allOpt.textContent = 'Pending Eligibility' +
+        (allPending > 0 ? ' \u2014 ' + allPending + ' pending' : '');
+      select.appendChild(allOpt);
+
+      for (var i = 0; i < qualifiers.length; i++) {
+        var q = qualifiers[i];
+        var opt = document.createElement('option');
+        opt.value = q.dateDisplay + '|' + q.format;
+
+        // Strip day name for dropdown (e.g., "Saturday, March 28" -> "March 28")
+        var displayDate = q.dateDisplay;
+        var commaPos = displayDate.indexOf(', ');
+        if (commaPos !== -1) displayDate = displayDate.substring(commaPos + 2);
+
+        var count = q.registrationCount || 0;
+        var unconfirmed = 0;
+        var regs = q.registrations || [];
+        for (var r = 0; r < regs.length; r++) {
+          if (!regs[r].eligibilityConfirmed) unconfirmed++;
+        }
+        var closedTag = q.isClosed ? ' [CLOSED]' : '';
+        var unconfTag = unconfirmed > 0 ? ' \u2014 ' + unconfirmed + ' pending' : '';
+        opt.textContent = displayDate + ' \u2014 ' + q.formatDisplay +
+          ' (' + count + ' registered)' + unconfTag + closedTag;
+
+        select.appendChild(opt);
+      }
+
+      // Restore previous selection if still valid
+      if (previousValue) {
+        select.value = previousValue;
+      }
+      if (!select.value && select.options.length > 0) {
+        select.selectedIndex = 0;
+      }
+    }
+
+    /**
+     * Counts unique member+format pairs with pending eligibility across all events.
+     */
+    function countAllPending_(qualifiers) {
+      var seen = {};
+      var count = 0;
+      for (var i = 0; i < qualifiers.length; i++) {
+        var regs = qualifiers[i].registrations || [];
+        for (var r = 0; r < regs.length; r++) {
+          var key = regs[r].memberNumber + '|' + qualifiers[i].format;
+          if (!seen[key]) {
+            seen[key] = true;
+            if (!regs[r].eligibilityConfirmed) count++;
+          }
+        }
+      }
+      return count;
+    }
+
+
+    // ======================================================================
+    // Table Rendering
+    // ======================================================================
+
+    /**
+     * Renders the registration table for the currently selected event.
+     */
+    function renderSelectedEvent() {
+      var container = document.getElementById('tableContainer');
+      var select = document.getElementById('eventSelect');
+      var selectedKey = select.value;
+
+      if (!adminData || !adminData.qualifiers || !selectedKey) {
+        container.innerHTML = '<div class="admin-empty">Select an event to view registrations.</div>';
+        return;
+      }
+
+      // "All Players" eligibility overview
+      if (selectedKey === 'ALL') {
+        renderAllPlayersView(container);
+        return;
+      }
+
+      // Find the qualifier matching the selected key
+      var qual = null;
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        if ((q.dateDisplay + '|' + q.format) === selectedKey) {
+          qual = q;
+          break;
+        }
+      }
+
+      if (!qual) {
+        container.innerHTML = '<div class="admin-empty">Event not found.</div>';
+        return;
+      }
+
+      var regs = qual.registrations || [];
+
+      // Event details banner
+      var statusBadge = qual.isClosed
+        ? '<span style="color:#dc3545;font-weight:800;">CLOSED</span>'
+        : '<span style="color:#28a745;font-weight:800;">OPEN</span>';
+
+      var detailsHtml = '<div class="event-details-banner">' +
+        '<div class="event-detail-row">' +
+          '<strong>' + esc(qual.dateDisplay) + '</strong> \u2014 ' +
+          esc(qual.formatDisplay) + ' \u2014 ' + statusBadge +
+        '</div>' +
+        '<div class="event-detail-row">' +
+          esc(qual.timeDisplay || '') +
+        '</div>' +
+        '<div class="event-detail-row">' +
+          esc(qual.locationName || '') +
+        '</div>' +
+        '<div class="event-detail-row event-detail-address">' +
+          esc(qual.locationAddress || '') +
+        '</div>' +
+      '</div>';
+
+      if (regs.length === 0) {
+        container.innerHTML = detailsHtml +
+          '<div class="admin-empty">No registrations for this event yet.</div>';
+        return;
+      }
+
+      // Show SL column for the event's format
+      var is8Ball = (qual.format === '8');
+      var slHeader = is8Ball ? '8-Ball SL' : '9-Ball SL';
+
+      // Build table
+      var html = detailsHtml +
+        '<div class="reg-table-wrap"><table class="reg-table">' +
+        '<thead><tr>' +
+          '<th>Member #</th>' +
+          '<th>Player Name</th>' +
+          '<th>' + esc(slHeader) + '</th>' +
+          '<th>Paid</th>' +
+          '<th>Eligibility</th>' +
+          '<th></th>' +
+        '</tr></thead><tbody>';
+
+      for (var r = 0; r < regs.length; r++) {
+        var reg = regs[r];
+        var fullName = (reg.firstName + ' ' + reg.lastName).trim();
+        var sl = is8Ball ? (reg.sl8 || '\u2014') : (reg.sl9 || '\u2014');
+
+        // Paid button state
+        var prePaidClass = (reg.prePaid === 'yes') ? 'on' : 'off';
+        var prePaidLabel = (reg.prePaid === 'yes') ? paidLabel_(reg.paymentMethod) : 'NOT PAID';
+
+        // Eligibility circles
+        var eligState = reg.eligibilityConfirmed || '';
+        var escMem  = esc(reg.memberNumber);
+        var escDate = esc(qual.dateDisplay);
+        var escFmt  = esc(qual.format);
+
+        html += '<tr>' +
+          '<td>' + esc(reg.memberNumber) + '</td>' +
+          '<td>' + esc(fullName) + '</td>' +
+          '<td class="sl-cell">' + esc(sl) + '</td>' +
+          '<td><button class="toggle-btn ' + prePaidClass + '"' +
+            ' data-member="' + escMem + '"' +
+            ' data-date="' + escDate + '"' +
+            ' data-format="' + escFmt + '"' +
+            ' data-field="prePaid"' +
+            ' onclick="handleToggle(this)">' + prePaidLabel + '</button></td>' +
+          '<td><div class="elig-circles">' +
+            '<button class="elig-circle elig-circle-yes' + (eligState === 'eligible' ? ' elig-active' : '') + '"' +
+              ' title="Eligible"' +
+              ' onclick="handleEligClick(this, \'' + escMem + '\', \'' + escDate + '\', \'' + escFmt + '\', \'eligible\')"' +
+              '>&#10003;</button>' +
+            '<button class="elig-circle elig-circle-no' + (eligState === 'ineligible' ? ' elig-active' : '') + '"' +
+              ' title="Ineligible"' +
+              ' onclick="handleEligClick(this, \'' + escMem + '\', \'' + escDate + '\', \'' + escFmt + '\', \'ineligible\')"' +
+              '>&#10005;</button>' +
+            '<button class="elig-circle elig-circle-maybe' + (eligState === '' ? ' elig-active' : '') + '"' +
+              ' title="Unconfirmed"' +
+              ' onclick="handleEligClick(this, \'' + escMem + '\', \'' + escDate + '\', \'' + escFmt + '\', \'\')"' +
+              '>?</button>' +
+          '</div></td>' +
+          '<td><button class="cancel-reg-btn"' +
+            ' title="Cancel Registration"' +
+            ' onclick="handleAdminCancel(\'' + escMem + '\', \'' +
+              escDate + '\', \'' + escFmt + '\')"' +
+            '>\u2715</button></td>' +
+        '</tr>';
+      }
+
+      html += '</tbody></table></div>';
+      container.innerHTML = html;
+    }
+
+
+    // ======================================================================
+    // Pending Eligibility — Filtered Overview
+    // ======================================================================
+
+    /**
+     * Renders a deduplicated view of registered players with at least
+     * one pending (unconfirmed) eligibility. Players fully resolved
+     * (all registered formats eligible or ineligible) are excluded.
+     */
+    function renderAllPlayersView(container) {
+      var playerMap = {};
+      var playerOrder = [];
+
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        var fmt = q.format;
+        var regs = q.registrations || [];
+
+        for (var r = 0; r < regs.length; r++) {
+          var reg = regs[r];
+          var mem = reg.memberNumber;
+
+          if (!playerMap[mem]) {
+            playerMap[mem] = {
+              memberNumber: mem,
+              firstName: reg.firstName,
+              lastName: reg.lastName,
+              elig8: '',
+              elig9: ''
+            };
+            playerOrder.push(mem);
+          }
+
+          if (fmt === '8' && !playerMap[mem]._seen8) {
+            playerMap[mem].elig8 = reg.eligibilityConfirmed || '';
+            playerMap[mem]._seen8 = true;
+          } else if (fmt === '9' && !playerMap[mem]._seen9) {
+            playerMap[mem].elig9 = reg.eligibilityConfirmed || '';
+            playerMap[mem]._seen9 = true;
+          }
+        }
+      }
+
+      // Filter to only players with at least one pending format
+      var pendingOrder = [];
+      for (var k = 0; k < playerOrder.length; k++) {
+        var pl = playerMap[playerOrder[k]];
+        var has8Pending = pl._seen8 && !pl.elig8;
+        var has9Pending = pl._seen9 && !pl.elig9;
+        if (has8Pending || has9Pending) {
+          pendingOrder.push(playerOrder[k]);
+        }
+      }
+
+      if (pendingOrder.length === 0) {
+        container.innerHTML =
+          '<div class="admin-empty">All caught up \u2014 no pending eligibility reviews.</div>';
+        return;
+      }
+
+      // Sort alphabetically by last name, then first name
+      pendingOrder.sort(function(a, b) {
+        var pa = playerMap[a], pb = playerMap[b];
+        var lastA = (pa.lastName || '').toLowerCase();
+        var lastB = (pb.lastName || '').toLowerCase();
+        if (lastA !== lastB) return lastA < lastB ? -1 : 1;
+        var firstA = (pa.firstName || '').toLowerCase();
+        var firstB = (pb.firstName || '').toLowerCase();
+        return firstA < firstB ? -1 : (firstA > firstB ? 1 : 0);
+      });
+
+      // Build table
+      var html =
+        '<div class="reg-table-wrap"><table class="reg-table">' +
+        '<thead><tr>' +
+          '<th>Member #</th>' +
+          '<th>Player Name</th>' +
+          '<th style="text-align:center;">8-Ball</th>' +
+          '<th style="text-align:center;">9-Ball</th>' +
+        '</tr></thead><tbody>';
+
+      for (var p = 0; p < pendingOrder.length; p++) {
+        var player = playerMap[pendingOrder[p]];
+        var fullName = (player.firstName + ' ' + player.lastName).trim();
+        var escMem = esc(player.memberNumber);
+
+        var circles8 = player._seen8
+          ? buildEligCircles_(escMem, '8', player.elig8)
+          : '<span style="color:var(--muted);">\u2014</span>';
+        var circles9 = player._seen9
+          ? buildEligCircles_(escMem, '9', player.elig9)
+          : '<span style="color:var(--muted);">\u2014</span>';
+
+        html += '<tr>' +
+          '<td>' + escMem + '</td>' +
+          '<td>' + esc(fullName) + '</td>' +
+          '<td>' + circles8 + '</td>' +
+          '<td>' + circles9 + '</td>' +
+        '</tr>';
+      }
+
+      html += '</tbody></table></div>';
+      container.innerHTML = html;
+    }
+
+    /**
+     * Builds HTML for 3 eligibility circle buttons for a member + format.
+     * In "All Players" view, qualDate is 'ALL'.
+     */
+    function buildEligCircles_(escMem, format, eligState) {
+      var escFmt = esc(format);
+      return '<div class="elig-circles">' +
+        '<button class="elig-circle elig-circle-yes' + (eligState === 'eligible' ? ' elig-active' : '') + '"' +
+          ' title="Eligible"' +
+          ' onclick="handleEligClick(this, \'' + escMem + '\', \'ALL\', \'' + escFmt + '\', \'eligible\')"' +
+          '>&#10003;</button>' +
+        '<button class="elig-circle elig-circle-no' + (eligState === 'ineligible' ? ' elig-active' : '') + '"' +
+          ' title="Ineligible"' +
+          ' onclick="handleEligClick(this, \'' + escMem + '\', \'ALL\', \'' + escFmt + '\', \'ineligible\')"' +
+          '>&#10005;</button>' +
+        '<button class="elig-circle elig-circle-maybe' + (eligState === '' ? ' elig-active' : '') + '"' +
+          ' title="Unconfirmed"' +
+          ' onclick="handleEligClick(this, \'' + escMem + '\', \'ALL\', \'' + escFmt + '\', \'\')"' +
+          '>?</button>' +
+      '</div>';
+    }
+
+
+    // ======================================================================
+    // Eligibility Queue — non-blocking, serial processing with retry
+    // ======================================================================
+    //
+    // Clicks are instant (optimistic UI), server calls process one-at-a-time
+    // in FIFO order, with automatic retry on failure.
+
+    var _eligQueue = [];
+    var _eligQueueProcessing = false;
+    var _eligQueueId = 0;
+
+    /**
+     * Click handler for eligibility circles. Immediately updates UI,
+     * enqueues server call, never blocks.
+     */
+    function handleEligClick(btn, memberNumber, qualDate, format, newState) {
+      // Optimistic UI: move .elig-active to clicked circle
+      var container = btn.parentElement;
+      if (container) {
+        var circles = container.querySelectorAll('.elig-circle');
+        for (var c = 0; c < circles.length; c++) {
+          circles[c].classList.remove('elig-active');
+        }
+      }
+      btn.classList.add('elig-active');
+
+      // Update cache so re-renders show the new state
+      updateCachedEligibility(memberNumber, format, newState);
+      populateEventDropdown(adminData.qualifiers);
+
+      // Enqueue server call
+      _enqueueElig(memberNumber, qualDate, format, newState);
+    }
+
+    function _enqueueElig(memberNumber, qualDate, format, newState) {
+      _eligQueueId++;
+      _eligQueue.push({
+        id: _eligQueueId,
+        memberNumber: memberNumber,
+        qualDate: qualDate,
+        format: format,
+        newState: newState,
+        retries: 0
+      });
+      _updateEligQueueToast();
+      if (!_eligQueueProcessing) {
+        _eligQueueProcessing = true;
+        _processEligQueue();
+      }
+    }
+
+    async function _processEligQueue() {
+      if (_eligQueue.length === 0) {
+        _eligQueueProcessing = false;
+        _updateEligQueueToast();
+        return;
+      }
+      var item = _eligQueue[0];
+      _updateEligQueueToast();
+
+      try {
+        var result = await callServer('toggleEligibility', {
+          memberNumber: item.memberNumber,
+          qualDate: item.qualDate,
+          format: item.format,
+          newState: item.newState
+        });
+
+        if (!result || !result.success) {
+          _handleEligQueueFailure(item, (result && result.error) || 'Unknown error');
+          return;
+        }
+
+        // Success — dequeue and process next
+        _eligQueue.shift();
+        _updateEligQueueToast();
+        _processEligQueue();
+
+      } catch (err) {
+        _handleEligQueueFailure(item, String(err));
+      }
+    }
+
+    function _handleEligQueueFailure(item, errMsg) {
+      item.retries++;
+      if (item.retries >= 3) {
+        // Give up — remove from queue, alert user
+        _eligQueue.shift();
+        _updateEligQueueToast();
+        console.error('Eligibility update failed after 3 retries:', errMsg, item);
+        alert('Eligibility update failed for member ' + item.memberNumber + ': ' + errMsg);
+        renderSelectedEvent();
+        _processEligQueue();
+      } else {
+        // Retry with backoff
+        _updateEligQueueToast();
+        setTimeout(function() {
+          _processEligQueue();
+        }, item.retries * 2000);
+      }
+    }
+
+    function _updateEligQueueToast() {
+      var el = document.getElementById('eligQueueToast');
+      if (!el) return;
+      if (_eligQueue.length === 0) {
+        el.style.display = 'none';
+        el.classList.remove('retrying');
+        return;
+      }
+      el.style.display = 'block';
+      var item = _eligQueue[0];
+      if (item.retries > 0) {
+        el.classList.add('retrying');
+        el.textContent = 'Retrying eligibility (' + item.retries + '/3)\u2026 ' + _eligQueue.length + ' pending';
+      } else {
+        el.classList.remove('retrying');
+        el.textContent = 'Saving ' + _eligQueue.length + ' eligibility update' + (_eligQueue.length > 1 ? 's' : '') + '\u2026';
+      }
+    }
+
+
+    // ======================================================================
+    // Payment Toggle Handler
+    // ======================================================================
+
+    /**
+     * Handles Paid toggle button click.
+     * UNDO (PAID -> NOT PAID): confirm modal first.
+     * FORWARD (NOT PAID -> PAID): payment method modal first.
+     * Optimistic UI update, server confirmation, rollback on failure.
+     */
+    function handleToggle(btn) {
+      btn.disabled = true;
+
+      var memberNumber = btn.getAttribute('data-member');
+      var qualDate     = btn.getAttribute('data-date');
+      var format       = btn.getAttribute('data-format');
+      var field        = btn.getAttribute('data-field');
+      var wasOn        = btn.classList.contains('on');
+      var playerName   = findPlayerName_(memberNumber);
+
+      // UNDO: requires confirmation
+      if (wasOn) {
+        showConfirmModal('Undo Payment', 'Undo payment for ' + playerName + '?', 'Yes, Undo', function() {
+          executeToggle(btn, memberNumber, qualDate, format, field, wasOn, '');
+        });
+        btn._pendingModal = true;
+        return;
+      }
+
+      // FORWARD: select payment method
+      showPayMethodModal(playerName, function(method) {
+        executeToggle(btn, memberNumber, qualDate, format, field, wasOn, method);
+      });
+      btn._pendingModal = true;
+    }
+
+    /**
+     * Executes the actual toggle after confirmation/method selection.
+     */
+    async function executeToggle(btn, memberNumber, qualDate, format, field, wasOn, paymentMethod) {
+      var newIsOn = !wasOn;
+
+      // Optimistic UI
+      btn.classList.toggle('on', newIsOn);
+      btn.classList.toggle('off', !newIsOn);
+      btn.textContent = newIsOn ? paidLabel_(paymentMethod) : 'NOT PAID';
+
+      try {
+        var result = await callServer('togglePrePaid', {
+          memberNumber: memberNumber,
+          qualDate: qualDate,
+          format: format,
+          paymentMethod: paymentMethod
+        });
+
+        if (!result || !result.success) {
+          // Server rejected — revert
+          btn.classList.toggle('on', wasOn);
+          btn.classList.toggle('off', !wasOn);
+          var prevMethod = wasOn ? findPaymentMethod_(memberNumber, qualDate, format) : '';
+          btn.textContent = wasOn ? paidLabel_(prevMethod) : 'NOT PAID';
+          alert('Toggle failed: ' + ((result && result.error) || 'Unknown error'));
+        } else {
+          // Server confirmed — update cache
+          updateCachedRegistration(memberNumber, qualDate, format, field, result.newValue);
+          updateCachedPaymentMethod(memberNumber, qualDate, format, result.paymentMethod || '');
+        }
+
+      } catch (err) {
+        // Network error — revert
+        btn.classList.toggle('on', wasOn);
+        btn.classList.toggle('off', !wasOn);
+        var errPrevMethod = wasOn ? findPaymentMethod_(memberNumber, qualDate, format) : '';
+        btn.textContent = wasOn ? paidLabel_(errPrevMethod) : 'NOT PAID';
+        alert('Toggle failed. Please try again.');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+
+    // ======================================================================
+    // Cache Helpers
+    // ======================================================================
+
+    /**
+     * Finds a player's display name from cached admin data.
+     */
+    function findPlayerName_(memberNumber) {
+      if (!adminData || !adminData.qualifiers) return 'Unknown';
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var regs = adminData.qualifiers[i].registrations || [];
+        for (var r = 0; r < regs.length; r++) {
+          if (regs[r].memberNumber === memberNumber) {
+            return (regs[r].firstName + ' ' + regs[r].lastName).trim() || 'Unknown';
+          }
+        }
+      }
+      return 'Unknown';
+    }
+
+    /**
+     * Updates the cached registration for a specific field (e.g., prePaid).
+     */
+    function updateCachedRegistration(memberNumber, qualDate, format, field, newValue) {
+      if (!adminData || !adminData.qualifiers) return;
+      var key = qualDate + '|' + format;
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        if ((q.dateDisplay + '|' + q.format) === key) {
+          var regs = q.registrations || [];
+          for (var r = 0; r < regs.length; r++) {
+            if (regs[r].memberNumber === memberNumber) {
+              if (field === 'prePaid') regs[r].prePaid = newValue;
+              return;
+            }
+          }
+        }
+      }
+    }
+
+    /**
+     * Updates eligibility for a member across ALL events of the same format.
+     * Eligibility is per-member per-format, not per-event.
+     */
+    function updateCachedEligibility(memberNumber, format, newValue) {
+      if (!adminData || !adminData.qualifiers) return;
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        if (q.format === format) {
+          var regs = q.registrations || [];
+          for (var r = 0; r < regs.length; r++) {
+            if (regs[r].memberNumber === memberNumber) {
+              regs[r].eligibilityConfirmed = newValue;
+            }
+          }
+        }
+      }
+    }
+
+    /**
+     * Generates the PAID button label. Includes method if known.
+     */
+    function paidLabel_(method) {
+      if (method && method !== 'Unknown') {
+        return 'PAID (' + method + ')';
+      }
+      return 'PAID';
+    }
+
+    /**
+     * Looks up cached payment method for a registration.
+     */
+    function findPaymentMethod_(memberNumber, qualDate, format) {
+      if (!adminData || !adminData.qualifiers) return '';
+      var key = qualDate + '|' + format;
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        if ((q.dateDisplay + '|' + q.format) === key) {
+          var regs = q.registrations || [];
+          for (var r = 0; r < regs.length; r++) {
+            if (regs[r].memberNumber === memberNumber) {
+              return regs[r].paymentMethod || '';
+            }
+          }
+        }
+      }
+      return '';
+    }
+
+    /**
+     * Updates cached paymentMethod for a registration.
+     */
+    function updateCachedPaymentMethod(memberNumber, qualDate, format, method) {
+      if (!adminData || !adminData.qualifiers) return;
+      var key = qualDate + '|' + format;
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        if ((q.dateDisplay + '|' + q.format) === key) {
+          var regs = q.registrations || [];
+          for (var r = 0; r < regs.length; r++) {
+            if (regs[r].memberNumber === memberNumber) {
+              regs[r].paymentMethod = method;
+              return;
+            }
+          }
+        }
+      }
+    }
+
+
+    // ======================================================================
+    // Admin Cancel Registration
+    // ======================================================================
+
+    /**
+     * Handles admin-initiated cancellation. Shows confirm modal first,
+     * then calls adminCancelRegistration on the server.
+     */
+    function handleAdminCancel(memberNumber, qualDate, format) {
+      var playerName = findPlayerName_(memberNumber);
+      var formatName = format === '8' ? '8-Ball' : '9-Ball';
+
+      showConfirmModal(
+        'Cancel Registration',
+        'Cancel ' + playerName + '\'s registration for ' + formatName + ' on ' + qualDate + '?\n\nThis will send them a cancellation email.',
+        'Yes, Cancel',
+        async function() {
+          try {
+            var result = await callServer('adminCancelRegistration', {
+              memberNumber: memberNumber,
+              qualDate: qualDate,
+              format: format
+            });
+
+            if (!result || !result.success) {
+              alert('Cancel failed: ' + ((result && result.error) || 'Unknown error'));
+              return;
+            }
+
+            // Remove from cache and re-render
+            removeCachedRegistration_(memberNumber, qualDate, format);
+            renderSelectedEvent();
+            updateTotalBar_();
+
+          } catch (err) {
+            alert('Cancel failed. Please try again.');
+          }
+        }
+      );
+    }
+
+    function removeCachedRegistration_(memberNumber, qualDate, format) {
+      if (!adminData || !adminData.qualifiers) return;
+      var key = qualDate + '|' + format;
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        if ((q.dateDisplay + '|' + q.format) === key) {
+          q.registrations = (q.registrations || []).filter(function(reg) {
+            return reg.memberNumber !== memberNumber;
+          });
+          q.registrationCount = q.registrations.length;
+          break;
+        }
+      }
+      if (adminData.totalRegistrations > 0) {
+        adminData.totalRegistrations--;
+      }
+    }
+
+    function updateTotalBar_() {
+      if (!adminData) return;
+      var totalBar = document.getElementById('totalBar');
+      totalBar.textContent = adminData.totalRegistrations + ' total registration' +
+        (adminData.totalRegistrations !== 1 ? 's' : '') + ' across ' +
+        adminData.qualifiers.length + ' event' + (adminData.qualifiers.length !== 1 ? 's' : '');
+      populateEventDropdown(adminData.qualifiers);
+    }
+
+
+    // ======================================================================
+    // CSV Export
+    // ======================================================================
+
+    /**
+     * Exports all registration data as a CSV file (client-side Blob download).
+     */
+    function exportCsv() {
+      if (!adminData || !adminData.qualifiers) {
+        alert('No data to export. Please refresh first.');
+        return;
+      }
+
+      var headers = [
+        'Event Date', 'Format', 'Location', 'Player Name', 'Member Number',
+        'Email', 'Phone', '8-Ball SL', '9-Ball SL', 'Paid',
+        'Payment Method', 'Eligibility Confirmed', 'Registered At'
+      ];
+
+      var rows = [headers.join(',')];
+
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        var regs = q.registrations || [];
+
+        for (var r = 0; r < regs.length; r++) {
+          var reg = regs[r];
+          rows.push([
+            csvEscape(q.dateDisplay),
+            csvEscape(q.formatDisplay),
+            csvEscape(q.locationName),
+            csvEscape((reg.firstName + ' ' + reg.lastName).trim()),
+            csvEscape(reg.memberNumber),
+            csvEscape(reg.email),
+            csvEscape(reg.phone),
+            csvEscape(reg.sl8 || ''),
+            csvEscape(reg.sl9 || ''),
+            csvEscape(reg.prePaid === 'yes' ? 'Yes' : ''),
+            csvEscape(reg.paymentMethod || ''),
+            csvEscape(reg.eligibilityConfirmed === 'yes' ? 'Yes' : ''),
+            csvEscape(reg.registeredAt)
+          ].join(','));
+        }
+      }
+
+      var csv = rows.join('\n');
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement('a');
+      link.href = url;
+      link.download = 'multipass-registrations.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function csvEscape(val) {
+      var str = String(val || '');
+      if (str.indexOf(',') !== -1 || str.indexOf('"') !== -1 || str.indexOf('\n') !== -1) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    }
+
+
+    // ======================================================================
+    // Tab Switching
+    // ======================================================================
+
+    var activeTab = 'registrations';
+
+    /**
+     * Switches between Registrations and Qualifiers views.
+     */
+    function switchTab(tab) {
+      activeTab = tab;
+
+      var regView = document.getElementById('registrationsView');
+      var qualView = document.getElementById('qualifiersView');
+      var tabReg = document.getElementById('tabRegistrations');
+      var tabQual = document.getElementById('tabQualifiers');
+
+      if (tab === 'qualifiers') {
+        regView.style.display = 'none';
+        qualView.style.display = '';
+        tabReg.classList.remove('active');
+        tabQual.classList.add('active');
+        renderQualifiersList();
+        loadMaintenanceState();
+      } else {
+        regView.style.display = '';
+        qualView.style.display = 'none';
+        tabReg.classList.add('active');
+        tabQual.classList.remove('active');
+      }
+    }
+
+
+    // ======================================================================
+    // Qualifiers View — Card List
+    // ======================================================================
+
+    /**
+     * Renders qualifier cards from adminData into the qualifiers container.
+     * Each card: date, format badge, time, location, cutoff, reg count,
+     * edit/delete buttons.
+     */
+    function renderQualifiersList() {
+      var container = document.getElementById('qualifiersList');
+
+      if (!adminData || !adminData.qualifiers || adminData.qualifiers.length === 0) {
+        container.innerHTML = '<div class="admin-empty">No qualifiers configured yet.</div>';
+        return;
+      }
+
+      var html = '';
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        var fmtClass = q.format === '8' ? 'fmt-8' : 'fmt-9';
+        var fmtLabel = q.format === '8' ? '8-Ball' : '9-Ball';
+        var regCount = q.registrationCount || 0;
+        var hasRegs = regCount > 0;
+
+        var cutoffHtml = '';
+        if (q.cutoffDisplay) {
+          cutoffHtml = '<div><strong>Cutoff:</strong> ' + esc(q.cutoffDisplay) + '</div>';
+        }
+
+        html += '<div class="qualifier-card">' +
+          '<div class="qualifier-card-header">' +
+            '<span class="qualifier-card-date">' + esc(q.dateDisplay) + '</span>' +
+            '<span class="format-badge ' + fmtClass + '">' + esc(fmtLabel) + '</span>' +
+          '</div>' +
+          '<div class="qualifier-card-detail">' +
+            '<div>' + esc(q.timeDisplay || '') + '</div>' +
+            '<div><strong>' + esc(q.locationName || '') + '</strong></div>' +
+            '<div>' + esc(q.locationAddress || '') + '</div>' +
+            cutoffHtml +
+            '<div>' + regCount + ' registration' + (regCount !== 1 ? 's' : '') + '</div>' +
+          '</div>' +
+          '<div class="qualifier-card-actions">' +
+            '<button class="qual-edit-btn" onclick="showQualifierModal(adminData.qualifiers[' + i + '])">Edit</button>' +
+            '<button class="qual-delete-btn"' +
+              (hasRegs ? ' disabled title="Cannot delete \u2014 has ' + regCount + ' registration' + (regCount !== 1 ? 's' : '') + '"' : '') +
+              ' onclick="handleDeleteQualifier(\'' + esc(q.dateDisplay) + '\', \'' + esc(q.format) + '\')">Delete</button>' +
+          '</div>' +
+        '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+
+    // ======================================================================
+    // Qualifier Add/Edit Modal
+    // ======================================================================
+
+    /** If editing, stores { dateDisplay, format } of the original. Null = adding. */
+    var _qualEditingOriginal = null;
+
+    /** Currently selected format in the modal ('8' or '9'). */
+    var _qualSelectedFormat = '';
+
+    /**
+     * Shows the qualifier add/edit modal.
+     * If qualifier is null, shows an empty "Add" form.
+     * If qualifier is an object, pre-populates all fields for editing.
+     */
+    function showQualifierModal(qualifier) {
+      var title = qualifier ? 'Edit Qualifier' : 'Add Qualifier';
+      document.getElementById('qualModalTitle').textContent = title;
+
+      if (qualifier) {
+        _qualEditingOriginal = {
+          dateDisplay: qualifier.dateDisplay,
+          format: qualifier.format
+        };
+        document.getElementById('qualStartInput').value = qualifier.startISO || '';
+        document.getElementById('qualEndInput').value = qualifier.endISO || '';
+        document.getElementById('qualCutoffInput').value = qualifier.cutoffISO || '';
+        document.getElementById('qualLocationName').value = qualifier.locationName || '';
+        document.getElementById('qualLocationAddress').value = qualifier.locationAddress || '';
+        selectQualFormat(qualifier.format);
+      } else {
+        _qualEditingOriginal = null;
+        document.getElementById('qualStartInput').value = '';
+        document.getElementById('qualEndInput').value = '';
+        document.getElementById('qualCutoffInput').value = '';
+        document.getElementById('qualLocationName').value = '';
+        document.getElementById('qualLocationAddress').value = '';
+        selectQualFormat('');
+      }
+
+      document.getElementById('qualifierModal').style.display = 'flex';
+    }
+
+    function closeQualifierModal() {
+      document.getElementById('qualifierModal').style.display = 'none';
+      _qualEditingOriginal = null;
+      _qualSelectedFormat = '';
+    }
+
+    /**
+     * Selects a format in the qualifier modal's format toggle.
+     */
+    function selectQualFormat(fmt) {
+      _qualSelectedFormat = fmt;
+      var btn8 = document.getElementById('fmtBtn8');
+      var btn9 = document.getElementById('fmtBtn9');
+      btn8.classList.remove('active-8');
+      btn9.classList.remove('active-9');
+      if (fmt === '8') btn8.classList.add('active-8');
+      if (fmt === '9') btn9.classList.add('active-9');
+    }
+
+    /**
+     * Reads form values and calls addQualifier or updateQualifier.
+     * Reloads admin data on success.
+     */
+    async function saveQualifier() {
+      var start = document.getElementById('qualStartInput').value;
+      var end = document.getElementById('qualEndInput').value;
+      var format = _qualSelectedFormat;
+      var locationName = document.getElementById('qualLocationName').value.trim();
+      var locationAddress = document.getElementById('qualLocationAddress').value.trim();
+      var cutoff = document.getElementById('qualCutoffInput').value;
+
+      if (!start || !end || !format || !locationName) {
+        alert('Please fill in Start, End, Format, and Location Name.');
+        return;
+      }
+
+      var qualData = {
+        start: start,
+        end: end,
+        format: format,
+        locationName: locationName,
+        locationAddress: locationAddress,
+        cutoff: cutoff
+      };
+
+      try {
+        var result;
+        if (_qualEditingOriginal) {
+          result = await callServer('updateQualifier', {
+            originalDateDisplay: _qualEditingOriginal.dateDisplay,
+            originalFormat: _qualEditingOriginal.format,
+            qualData: qualData
+          });
+        } else {
+          result = await callServer('addQualifier', {
+            qualData: qualData
+          });
+        }
+
+        if (!result || !result.success) {
+          alert('Save failed: ' + ((result && result.error) || 'Unknown error'));
+          return;
+        }
+
+        closeQualifierModal();
+        await loadAdminData();
+        switchTab('qualifiers');
+
+      } catch (err) {
+        alert('Save failed. Please try again.');
+      }
+    }
+
+
+    // ======================================================================
+    // Qualifier Delete
+    // ======================================================================
+
+    /**
+     * Handles deleting a qualifier. Confirm modal first, then server call.
+     */
+    function handleDeleteQualifier(dateDisplay, format) {
+      var formatName = format === '8' ? '8-Ball' : '9-Ball';
+      showConfirmModal(
+        'Delete Qualifier',
+        'Delete the ' + formatName + ' qualifier on ' + dateDisplay + '?\n\nThis cannot be undone.',
+        'Yes, Delete',
+        async function() {
+          try {
+            var result = await callServer('deleteQualifier', {
+              dateDisplay: dateDisplay,
+              format: format
+            });
+            if (!result || !result.success) {
+              alert('Delete failed: ' + ((result && result.error) || 'Unknown error'));
+              return;
+            }
+            await loadAdminData();
+            switchTab('qualifiers');
+          } catch (err) {
+            alert('Delete failed. Please try again.');
+          }
+        }
+      );
+    }
+
+
+    // ======================================================================
+    // Maintenance Mode
+    // ======================================================================
+
+    /**
+     * Loads maintenance state from adminData and sets checkbox.
+     */
+    function loadMaintenanceState() {
+      if (!adminData) return;
+      var checkbox = document.getElementById('maintenanceCheckbox');
+      var keyDisplay = document.getElementById('bypassKeyDisplay');
+
+      var isEnabled = adminData.maintenanceMode || false;
+      checkbox.checked = isEnabled;
+
+      if (isEnabled && adminData.bypassKey) {
+        keyDisplay.textContent = 'Bypass key: ' + adminData.bypassKey;
+        keyDisplay.style.display = '';
+      } else {
+        keyDisplay.style.display = 'none';
+      }
+    }
+
+    /**
+     * Called when maintenance checkbox changes. Calls setMaintenanceMode.
+     */
+    async function toggleMaintenance() {
+      var checkbox = document.getElementById('maintenanceCheckbox');
+      var keyDisplay = document.getElementById('bypassKeyDisplay');
+      var enabled = checkbox.checked;
+
+      try {
+        var result = await callServer('setMaintenanceMode', {
+          enabled: enabled
+        });
+
+        if (!result || !result.success) {
+          checkbox.checked = !enabled;
+          alert('Failed: ' + ((result && result.error) || 'Unknown error'));
+          return;
+        }
+
+        adminData.maintenanceMode = enabled;
+
+        if (enabled && result.bypassKey) {
+          adminData.bypassKey = result.bypassKey;
+          keyDisplay.textContent = 'Bypass key: ' + result.bypassKey;
+          keyDisplay.style.display = '';
+        } else {
+          keyDisplay.style.display = 'none';
+        }
+
+      } catch (err) {
+        checkbox.checked = !enabled;
+        alert('Failed to toggle maintenance mode. Please try again.');
+      }
+    }
+
+
+    // ======================================================================
+    // Initialization
+    // ======================================================================
+
+    document.addEventListener('DOMContentLoaded', function() {
+
+      // -- Auth gate: check for admin token --
+      if (!adminToken) {
+        document.getElementById('authError').style.display = '';
+        document.getElementById('mainContent').style.display = 'none';
+        return;
+      }
+
+      // Token present — show main content
+      document.getElementById('authError').style.display = 'none';
+      document.getElementById('mainContent').style.display = '';
+
+      // -- Confirm modal event wiring --
+
+      document.getElementById('confirmYes').addEventListener('click', function() {
+        if (pendingConfirm) {
+          var fn = pendingConfirm;
+          closeConfirmModal();
+          fn();
+        }
+      });
+
+      document.getElementById('confirmNo').addEventListener('click', function() {
+        reEnablePendingButton_();
+        closeConfirmModal();
+      });
+
+      document.getElementById('confirmModal').addEventListener('click', function(e) {
+        if (e.target && e.target.id === 'confirmModal') {
+          reEnablePendingButton_();
+          closeConfirmModal();
+        }
+      });
+
+      // -- Payment method modal event wiring --
+
+      var methodButtons = document.querySelectorAll('.pay-method-btn[data-method]');
+      for (var m = 0; m < methodButtons.length; m++) {
+        methodButtons[m].addEventListener('click', function() {
+          if (pendingPayMethod) {
+            var fn = pendingPayMethod;
+            var method = this.getAttribute('data-method');
+            closePayMethodModal();
+            fn(method);
+          }
+        });
+      }
+
+      document.getElementById('payMethodCancel').addEventListener('click', function() {
+        reEnablePendingButton_();
+        closePayMethodModal();
+      });
+
+      document.getElementById('payMethodModal').addEventListener('click', function(e) {
+        if (e.target && e.target.id === 'payMethodModal') {
+          reEnablePendingButton_();
+          closePayMethodModal();
+        }
+      });
+
+      // -- Qualifier modal backdrop click --
+      document.getElementById('qualifierModal').addEventListener('click', function(e) {
+        if (e.target && e.target.id === 'qualifierModal') {
+          closeQualifierModal();
+        }
+      });
+
+      // -- Load data --
+      loadAdminData();
+    });
+
+    /**
+     * Re-enables toggle buttons that triggered a modal (if user cancels).
+     */
+    function reEnablePendingButton_() {
+      var buttons = document.querySelectorAll('.toggle-btn');
+      for (var i = 0; i < buttons.length; i++) {
+        if (buttons[i]._pendingModal) {
+          buttons[i].disabled = false;
+          buttons[i]._pendingModal = false;
+        }
+      }
+    }
+
+  </script>
+</body>
+</html>
