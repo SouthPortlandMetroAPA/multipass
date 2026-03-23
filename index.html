@@ -1534,37 +1534,6 @@
 </head>
 <body>
 
-  <!-- ================================================================
-       MAINTENANCE GATE
-       ================================================================
-       Shows a maintenance page unless ?key=<bypass_guid> is in the URL.
-       Bypass key: 134266877f644ab6afac06b5d940ce40
-       Remove this entire block + the <script> when maintenance is over.
-       ================================================================ -->
-  <div id="maintenance-screen" style="display:none;position:fixed;inset:0;z-index:99999;background:#000;color:#fff;font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:40px 20px;">
-    <div style="max-width:500px;margin:0 auto;position:relative;top:50%;transform:translateY(-50%);">
-      <div style="font-size:48px;font-weight:900;line-height:1.1;margin-bottom:24px;color:#ea002a;">
-        MultiPass
-      </div>
-      <div style="font-size:20px;font-weight:600;color:#0031a1;text-transform:uppercase;letter-spacing:0.15em;margin-bottom:16px;">Under Maintenance</div>
-      <div style="font-size:15px;color:#888;line-height:1.6;">We're making improvements.<br>Check back shortly.</div>
-    </div>
-  </div>
-  <script>
-    (function() {
-      var bypassKey = '134266877f644ab6afac06b5d940ce40';
-      var params = new URLSearchParams(window.location.search);
-      if (params.get('key') !== bypassKey) {
-        document.getElementById('maintenance-screen').style.display = 'block';
-        // Hide the real app content
-        var page = document.querySelector('.page');
-        if (page) page.style.display = 'none';
-        // Stop — don't load anything else
-        window.MAINTENANCE_MODE = true;
-      }
-    })();
-  </script>
-
   <!-- Page wrapper: 100vw + 6px padding = PatchCheck/SharpShooters standard -->
   <div class="page">
 
@@ -2839,9 +2808,6 @@
     // -- Initialization ---------------------------------------------------
 
     document.addEventListener('DOMContentLoaded', function() {
-      // Skip all init if maintenance mode is active
-      if (window.MAINTENANCE_MODE) return;
-
       document.getElementById('headerTitle').textContent = APP_NAME;
 
       var form = document.getElementById('searchForm');
