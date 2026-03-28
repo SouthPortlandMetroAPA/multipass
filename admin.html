@@ -425,6 +425,63 @@
       cursor: not-allowed;
     }
 
+    /* -- Payment Summary Box -- */
+    .payment-summary {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .payment-summary-title {
+      font-weight: 700;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #495057;
+      margin-bottom: 8px;
+    }
+    .payment-summary-fees {
+      font-size: 0.8rem;
+      color: #6c757d;
+      margin-bottom: 12px;
+    }
+    .payment-summary-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 16px;
+      margin-bottom: 12px;
+    }
+    .payment-summary-method {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      padding: 4px 0;
+    }
+    .payment-summary-label {
+      color: #495057;
+      font-weight: 600;
+    }
+    .payment-summary-value {
+      color: #6c757d;
+    }
+    .payment-summary-totals {
+      border-top: 2px solid #dee2e6;
+      padding-top: 8px;
+    }
+    .payment-summary-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      padding: 4px 0;
+    }
+    .payment-summary-row strong {
+      color: #28a745;
+    }
+    .payment-summary-unpaid strong {
+      color: #dc3545;
+    }
+
     /* Legacy paid (prePaid=yes but no method recorded) — amber outline
        signals "paid under old system, tap the correct method to assign".
        PaymentMethod is now the source of truth for paid status; these rows
@@ -1103,6 +1160,17 @@
           <input type="datetime-local" class="qual-form-input" id="qualCutoffInput">
         </div>
 
+        <div style="display:flex;gap:12px;">
+          <div class="qual-form-group" style="flex:1;">
+            <label class="qual-form-label" for="qualEntryFee">Entry Fee ($)</label>
+            <input type="number" class="qual-form-input" id="qualEntryFee" min="0" step="1" value="50">
+          </div>
+          <div class="qual-form-group" style="flex:1;">
+            <label class="qual-form-label" for="qualGreensFee">Greens Fee ($)</label>
+            <input type="number" class="qual-form-input" id="qualGreensFee" min="0" step="1" value="3">
+          </div>
+        </div>
+
         <div class="modal-actions">
           <button class="modal-btn modal-btn-dismiss" type="button" onclick="closeQualifierModal()">Cancel</button>
           <button class="qual-save-btn" type="button" onclick="saveQualifier()">Save</button>
@@ -1523,6 +1591,53 @@
         });
       }
 
+      // ── Payment summary: count paid per method, compute totals ────────
+      // Uses ALL registrations (not filtered copy) so numbers are always correct.
+      var perPlayer = (qual.entryFee || 50) + (qual.greensFee || 3);
+      var methodTotals = {};    // { Cash: count, Venmo: count, ... }
+      var paidCount = 0;
+      var unpaidCount = 0;
+      for (var pi = 0; pi < regs.length; pi++) {
+        var pm = regs[pi].paymentMethod;
+        if (pm) {
+          paidCount++;
+          methodTotals[pm] = (methodTotals[pm] || 0) + 1;
+        } else {
+          unpaidCount++;
+        }
+      }
+      var grandTotal = paidCount * perPlayer;
+
+      // Build summary box HTML
+      var summaryHtml = '<div class="payment-summary">' +
+        '<div class="payment-summary-title">Payment Summary</div>' +
+        '<div class="payment-summary-fees">' +
+          '$' + (qual.entryFee || 50) + ' entry + $' + (qual.greensFee || 3) + ' greens = <strong>$' + perPlayer + '</strong> per player' +
+        '</div>' +
+        '<div class="payment-summary-grid">';
+
+      var methodOrder = ['Cash', 'CashApp', 'Venmo', 'PayPal'];
+      for (var mi2 = 0; mi2 < methodOrder.length; mi2++) {
+        var mName = methodOrder[mi2];
+        var mCount = methodTotals[mName] || 0;
+        var mTotal = mCount * perPlayer;
+        summaryHtml += '<div class="payment-summary-method">' +
+          '<span class="payment-summary-label">' + mName + '</span>' +
+          '<span class="payment-summary-value">' + mCount + ' &times; $' + perPlayer + ' = <strong>$' + mTotal + '</strong></span>' +
+        '</div>';
+      }
+
+      summaryHtml += '</div>' +
+        '<div class="payment-summary-totals">' +
+          '<div class="payment-summary-row">' +
+            '<span>Paid</span><strong>' + paidCount + ' player' + (paidCount !== 1 ? 's' : '') + ' &mdash; $' + grandTotal + '</strong>' +
+          '</div>' +
+          '<div class="payment-summary-row payment-summary-unpaid">' +
+            '<span>Not Paid (did not attend)</span><strong>' + unpaidCount + ' player' + (unpaidCount !== 1 ? 's' : '') + '</strong>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
       // Filter: hide paid rows when toggle is active
       if (hidePaid) {
         sortedRegs = sortedRegs.filter(function(reg) {
@@ -1533,7 +1648,7 @@
       // Build table — First and Last name are separate sortable columns
       var filterBtnLabel = hidePaid ? 'Show All' : 'Hide Paid';
       var filterBtnClass = hidePaid ? ' active' : '';
-      var html = detailsHtml +
+      var html = detailsHtml + summaryHtml +
         '<div style="display:flex;justify-content:flex-end;margin-bottom:8px;">' +
           '<button class="pay-btn' + filterBtnClass + '" ' +
             'onclick="toggleHidePaid()" ' +
@@ -2435,6 +2550,8 @@
         document.getElementById('qualCutoffInput').value = qualifier.cutoffISO || '';
         document.getElementById('qualLocationName').value = qualifier.locationName || '';
         document.getElementById('qualLocationAddress').value = qualifier.locationAddress || '';
+        document.getElementById('qualEntryFee').value = qualifier.entryFee != null ? qualifier.entryFee : 50;
+        document.getElementById('qualGreensFee').value = qualifier.greensFee != null ? qualifier.greensFee : 3;
         selectQualFormat(qualifier.format);
       } else {
         _qualEditingOriginal = null;
@@ -2443,6 +2560,8 @@
         document.getElementById('qualCutoffInput').value = '';
         document.getElementById('qualLocationName').value = '';
         document.getElementById('qualLocationAddress').value = '';
+        document.getElementById('qualEntryFee').value = 50;
+        document.getElementById('qualGreensFee').value = 3;
         selectQualFormat('');
       }
 
@@ -2485,13 +2604,18 @@
         return;
       }
 
+      var entryFee = document.getElementById('qualEntryFee').value;
+      var greensFee = document.getElementById('qualGreensFee').value;
+
       var qualData = {
         start: start,
         end: end,
         format: format,
         locationName: locationName,
         locationAddress: locationAddress,
-        cutoff: cutoff
+        cutoff: cutoff,
+        entryFee: entryFee,
+        greensFee: greensFee
       };
 
       try {
