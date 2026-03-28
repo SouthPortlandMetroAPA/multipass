@@ -425,6 +425,14 @@
       cursor: not-allowed;
     }
 
+    /* Legacy paid (prePaid=yes but no method recorded) — amber outline
+       signals "paid under old system, tap the correct method to assign" */
+    .pay-btns.legacy-paid .pay-btn {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffc107;
+    }
+
     /* -- Eligibility circle buttons -- */
     .elig-circles {
       display: flex;
@@ -1503,9 +1511,13 @@
         var escDate = esc(qual.dateDisplay);
         var escFmt  = esc(qual.format);
 
-        // Build 4 payment-method pill buttons
+        // Build 4 payment-method pill buttons.
+        // Legacy case: prePaid="yes" but paymentMethod="" means paid under the
+        // old toggle system before payment method tracking was added.
+        // Show amber-outlined buttons so admin can assign the correct method.
         var methods = ['Cash', 'CashApp', 'Venmo', 'PayPal'];
-        var payBtnsHtml = '<div class="pay-btns">';
+        var legacyPaid = (reg.prePaid === 'yes' && !paidMethod);
+        var payBtnsHtml = '<div class="pay-btns' + (legacyPaid ? ' legacy-paid' : '') + '">';
         for (var mi = 0; mi < methods.length; mi++) {
           var m = methods[mi];
           var isActive = (paidMethod === m) ? ' active' : '';
