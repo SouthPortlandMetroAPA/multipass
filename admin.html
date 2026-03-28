@@ -477,6 +477,36 @@
     .elig-circle-no    { background: #dc3545; }
     .elig-circle-maybe { background: #999; }
 
+    /* -- Singles Regionals toggle button -- */
+    /* Simple yes/no toggle: gray when not qualified, gold when qualified. */
+    .singles-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px;
+      min-height: 32px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: none;
+      font-size: 0.625rem;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.2s, color 0.2s;
+      background: #e9ecef;
+      color: #6c757d;
+    }
+    .singles-btn.active {
+      background: #f59e0b;
+      color: #fff;
+    }
+    .singles-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     /* -- Eligibility queue toast -- */
     .elig-queue-toast {
       display: none;
@@ -1496,6 +1526,7 @@
           '<th>' + esc(slHeader) + '</th>' +
           '<th>Payment</th>' +
           '<th>Eligibility</th>' +
+          '<th>Singles</th>' +
           '<th></th>' +
         '</tr></thead><tbody>';
 
@@ -1554,6 +1585,11 @@
               ' onclick="handleEligClick(this, \'' + escMem + '\', \'' + escDate + '\', \'' + escFmt + '\', \'\')"' +
               '>?</button>' +
           '</div></td>' +
+          '<td><button class="singles-btn' + (reg.singlesRegionals === 'yes' ? ' active' : '') + '"' +
+            ' data-member="' + escMem + '"' +
+            ' data-format="' + escFmt + '"' +
+            ' onclick="handleSinglesToggle(this)"' +
+            '>' + (reg.singlesRegionals === 'yes' ? '\u2605 YES' : '\u2606') + '</button></td>' +
           '<td><button class="cancel-reg-btn"' +
             ' title="Cancel Registration"' +
             ' onclick="handleAdminCancel(\'' + escMem + '\', \'' +
@@ -1916,6 +1952,88 @@
 
 
     // ======================================================================
+    // Singles Regionals Toggle Handler
+    // ======================================================================
+
+    /**
+     * Handles the Singles Regionals toggle button click.
+     * Simple yes/"" toggle — gold star when qualified, gray when not.
+     * Optimistic UI with server confirmation + rollback on failure.
+     */
+    async function handleSinglesToggle(btn) {
+      var memberNumber = btn.getAttribute('data-member');
+      var format       = btn.getAttribute('data-format');
+      var isActive     = btn.classList.contains('active');
+      var newValue     = isActive ? '' : 'yes';
+
+      // Optimistic UI
+      btn.disabled = true;
+      if (newValue === 'yes') {
+        btn.classList.add('active');
+        btn.innerHTML = '\u2605 YES';
+      } else {
+        btn.classList.remove('active');
+        btn.innerHTML = '\u2606';
+      }
+
+      try {
+        var result = await callServer('toggleSinglesRegionals', {
+          adminToken: ADMIN_TOKEN,
+          memberNumber: memberNumber,
+          format: format,
+          newValue: newValue
+        });
+
+        if (!result || !result.success) {
+          // Revert
+          if (isActive) {
+            btn.classList.add('active');
+            btn.innerHTML = '\u2605 YES';
+          } else {
+            btn.classList.remove('active');
+            btn.innerHTML = '\u2606';
+          }
+          alert('Singles Regionals update failed: ' + ((result && result.error) || 'Unknown error'));
+        } else {
+          // Update local cache
+          updateCachedSinglesRegionals(memberNumber, format, result.newValue);
+        }
+
+      } catch (err) {
+        // Revert
+        if (isActive) {
+          btn.classList.add('active');
+          btn.innerHTML = '\u2605 YES';
+        } else {
+          btn.classList.remove('active');
+          btn.innerHTML = '\u2606';
+        }
+        alert('Singles Regionals update failed. Please try again.');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    /**
+     * Updates the cached singlesRegionals field for a member across all
+     * qualifiers of the same format (since it's per-member per-format).
+     */
+    function updateCachedSinglesRegionals(memberNumber, format, newValue) {
+      if (!adminData || !adminData.qualifiers) return;
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        if (q.format !== format) continue;
+        var regs = q.registrations || [];
+        for (var r = 0; r < regs.length; r++) {
+          if (regs[r].memberNumber === memberNumber) {
+            regs[r].singlesRegionals = newValue;
+          }
+        }
+      }
+    }
+
+
+    // ======================================================================
     // Cache Helpers
     // ======================================================================
 
@@ -2092,7 +2210,9 @@
     // ======================================================================
 
     /**
-     * Exports all registration data as a CSV file (client-side Blob download).
+     * Exports registration data as a CSV file (client-side Blob download).
+     * If a specific qualifier is selected, exports only that qualifier's data.
+     * If "Pending Eligibility" or no selection, exports all qualifiers.
      */
     function exportCsv() {
       if (!adminData || !adminData.qualifiers) {
@@ -2100,16 +2220,40 @@
         return;
       }
 
+      // Determine which qualifiers to export based on current selection
+      var select = document.getElementById('eventSelect');
+      var selectedValue = select ? select.value : '';
+      var qualsToExport = [];
+      var fileLabel = 'all';
+
+      if (selectedValue && selectedValue !== '__pending__') {
+        // Specific qualifier selected — export only that one
+        var parts = selectedValue.split('|');
+        var selDate = parts[0];
+        var selFmt  = parts[1];
+        for (var qi = 0; qi < adminData.qualifiers.length; qi++) {
+          var candidate = adminData.qualifiers[qi];
+          if (candidate.dateDisplay === selDate && candidate.format === selFmt) {
+            qualsToExport.push(candidate);
+            fileLabel = selDate.replace(/[^a-zA-Z0-9]/g, '-') + '-' + candidate.formatDisplay;
+            break;
+          }
+        }
+      } else {
+        // All qualifiers
+        qualsToExport = adminData.qualifiers;
+      }
+
       var headers = [
-        'Event Date', 'Format', 'Location', 'Player Name', 'Member Number',
-        'Email', 'Phone', '8-Ball SL', '9-Ball SL',
-        'Payment Method', 'Eligibility Confirmed', 'Registered At'
+        'Event Date', 'Format', 'Location', 'First Name', 'Last Name',
+        'Member Number', 'Email', 'Phone', '8-Ball SL', '9-Ball SL',
+        'Payment Method', 'Eligibility', 'Singles Regionals', 'Registered At'
       ];
 
       var rows = [headers.join(',')];
 
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
+      for (var i = 0; i < qualsToExport.length; i++) {
+        var q = qualsToExport[i];
         var regs = q.registrations || [];
 
         for (var r = 0; r < regs.length; r++) {
@@ -2118,14 +2262,16 @@
             csvEscape(q.dateDisplay),
             csvEscape(q.formatDisplay),
             csvEscape(q.locationName),
-            csvEscape((reg.firstName + ' ' + reg.lastName).trim()),
+            csvEscape(reg.firstName || ''),
+            csvEscape(reg.lastName || ''),
             csvEscape(reg.memberNumber),
             csvEscape(reg.email),
             csvEscape(reg.phone),
             csvEscape(reg.sl8 || ''),
             csvEscape(reg.sl9 || ''),
             csvEscape(reg.paymentMethod || ''),
-            csvEscape(reg.eligibilityConfirmed === 'yes' ? 'Yes' : ''),
+            csvEscape(reg.eligibilityConfirmed || ''),
+            csvEscape(reg.singlesRegionals === 'yes' ? 'Yes' : ''),
             csvEscape(reg.registeredAt)
           ].join(','));
         }
@@ -2136,7 +2282,7 @@
       var url = URL.createObjectURL(blob);
       var link = document.createElement('a');
       link.href = url;
-      link.download = 'multipass-registrations.csv';
+      link.download = 'multipass-' + fileLabel + '.csv';
       link.click();
       URL.revokeObjectURL(url);
     }
