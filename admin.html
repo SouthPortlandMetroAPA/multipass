@@ -1384,6 +1384,7 @@
      * dir: 'asc' or 'desc'.
      */
     var currentSort = { key: '', dir: 'asc' };
+    var hidePaid = false;  // Filter toggle: hide rows with a paymentMethod set
 
     /**
      * Handles a sortable column header click.
@@ -1406,6 +1407,12 @@
         currentSort.key = key;
         currentSort.dir = 'asc';
       }
+      renderSelectedEvent();
+    }
+
+    /** Toggle the "hide paid" filter and re-render. */
+    function toggleHidePaid() {
+      hidePaid = !hidePaid;
       renderSelectedEvent();
     }
 
@@ -1516,8 +1523,24 @@
         });
       }
 
+      // Filter: hide paid rows when toggle is active
+      if (hidePaid) {
+        sortedRegs = sortedRegs.filter(function(reg) {
+          return !reg.paymentMethod;
+        });
+      }
+
       // Build table — First and Last name are separate sortable columns
+      var filterBtnLabel = hidePaid ? 'Show All' : 'Hide Paid';
+      var filterBtnClass = hidePaid ? ' active' : '';
       var html = detailsHtml +
+        '<div style="display:flex;justify-content:flex-end;margin-bottom:8px;">' +
+          '<button class="pay-btn' + filterBtnClass + '" ' +
+            'onclick="toggleHidePaid()" ' +
+            'style="font-size:0.7rem;padding:6px 14px;min-height:36px;">' +
+            filterBtnLabel + ' (' + (regs.length - sortedRegs.length) + ' hidden)' +
+          '</button>' +
+        '</div>' +
         '<div class="reg-table-wrap"><table class="reg-table">' +
         '<thead><tr>' +
           '<th>Member #</th>' +
