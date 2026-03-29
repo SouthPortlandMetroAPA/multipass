@@ -1455,17 +1455,25 @@
         select.appendChild(opt);
       }
 
-      // Restore previous selection if still valid, then try localStorage
-      if (previousValue) {
+      // Restore previous selection if still valid, then try localStorage.
+      // IMPORTANT: After rebuilding options, the browser auto-selects the
+      // first option ("ALL"), so select.value is already truthy. We must
+      // check localStorage BEFORE falling through, not after.
+      var restored = false;
+      if (previousValue && previousValue !== 'ALL') {
         select.value = previousValue;
+        restored = (select.value === previousValue);
       }
-      if (!select.value) {
+      if (!restored) {
         try {
           var saved = localStorage.getItem('multipass_admin_lastQual');
-          if (saved) select.value = saved;
+          if (saved) {
+            select.value = saved;
+            restored = (select.value === saved);
+          }
         } catch(e) {}
       }
-      if (!select.value && select.options.length > 0) {
+      if (!restored && select.options.length > 0) {
         select.selectedIndex = 0;
       }
     }
