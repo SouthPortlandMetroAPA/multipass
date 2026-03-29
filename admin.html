@@ -1545,6 +1545,70 @@
     }
 
     /**
+     * Copy emails of currently visible players (after filtering) to clipboard.
+     * Strips spaces from emails. Shows a brief confirmation.
+     */
+    function copyEmails() {
+      var select = document.getElementById('eventSelect');
+      var selectedKey = select ? select.value : '';
+      if (!adminData || !selectedKey || selectedKey === 'ALL') {
+        alert('Select a qualifier first.');
+        return;
+      }
+
+      // Find the qualifier
+      var qual = null;
+      for (var i = 0; i < adminData.qualifiers.length; i++) {
+        var q = adminData.qualifiers[i];
+        if ((q.dateDisplay + '|' + q.format) === selectedKey) { qual = q; break; }
+      }
+      if (!qual) return;
+
+      // Apply the same filter as the current view
+      var regs = (qual.registrations || []).slice();
+      if (activeFilter === 'unpaid') {
+        regs = regs.filter(function(r) { return !r.paymentMethod; });
+      } else if (activeFilter === 'paid') {
+        regs = regs.filter(function(r) { return !!r.paymentMethod; });
+      } else if (activeFilter === 'eligible') {
+        regs = regs.filter(function(r) { return r.eligibilityConfirmed === 'eligible'; });
+      } else if (activeFilter === 'ineligible') {
+        regs = regs.filter(function(r) { return r.eligibilityConfirmed === 'ineligible'; });
+      } else if (activeFilter === 'unconfirmed') {
+        regs = regs.filter(function(r) { return !r.eligibilityConfirmed; });
+      } else if (activeFilter === 'qualified') {
+        regs = regs.filter(function(r) { return r.singlesRegionals === 'yes'; });
+      }
+
+      // Collect non-empty emails, strip spaces
+      var emails = [];
+      for (var j = 0; j < regs.length; j++) {
+        var email = (regs[j].email || '').replace(/\s/g, '');
+        if (email) emails.push(email);
+      }
+
+      if (emails.length === 0) {
+        alert('No emails to copy.');
+        return;
+      }
+
+      var text = emails.join(', ');
+      navigator.clipboard.writeText(text).then(function() {
+        // Brief visual feedback — flash the copy button
+        var btn = document.querySelector('[onclick="copyEmails()"]');
+        if (btn) {
+          var orig = btn.textContent;
+          btn.textContent = '\u2705 Copied ' + emails.length + '!';
+          btn.classList.add('active');
+          setTimeout(function() { btn.textContent = orig; btn.classList.remove('active'); }, 2000);
+        }
+      }).catch(function() {
+        // Fallback: select a textarea
+        prompt('Copy these emails:', text);
+      });
+    }
+
+    /**
      * Returns the CSS class suffix for a sortable <th>.
      * Used during header rendering to show the active sort arrow.
      */
@@ -1558,6 +1622,11 @@
      * Normalizes to lowercase string for case-insensitive sorting.
      */
     function getSortValue_(reg, key, is8Ball) {
+      if (key === 'sl') {
+        // Sort by the relevant SL as a number (blanks sort last)
+        var slVal = is8Ball ? (reg.sl8 || '') : (reg.sl9 || '');
+        return slVal ? parseInt(slVal, 10) : 999;
+      }
       var val = reg[key] || '';
       return String(val).toLowerCase();
     }
@@ -1717,6 +1786,12 @@
         sortedRegs = sortedRegs.filter(function(reg) { return !reg.paymentMethod; });
       } else if (activeFilter === 'paid') {
         sortedRegs = sortedRegs.filter(function(reg) { return !!reg.paymentMethod; });
+      } else if (activeFilter === 'eligible') {
+        sortedRegs = sortedRegs.filter(function(reg) { return reg.eligibilityConfirmed === 'eligible'; });
+      } else if (activeFilter === 'ineligible') {
+        sortedRegs = sortedRegs.filter(function(reg) { return reg.eligibilityConfirmed === 'ineligible'; });
+      } else if (activeFilter === 'unconfirmed') {
+        sortedRegs = sortedRegs.filter(function(reg) { return !reg.eligibilityConfirmed; });
       } else if (activeFilter === 'qualified') {
         sortedRegs = sortedRegs.filter(function(reg) { return reg.singlesRegionals === 'yes'; });
       }
@@ -1728,7 +1803,16 @@
         if (regs[qi].singlesRegionals === 'yes') qualifiedCount++;
       }
 
-      // Filter buttons — pill bar with 4 options
+      // Count eligibility states from full list
+      var eligibleCount = 0, ineligibleCount = 0, unconfirmedCount = 0;
+      for (var ei = 0; ei < regs.length; ei++) {
+        var es = regs[ei].eligibilityConfirmed || '';
+        if (es === 'eligible') eligibleCount++;
+        else if (es === 'ineligible') ineligibleCount++;
+        else unconfirmedCount++;
+      }
+
+      // Filter buttons — pill bar with filters + copy emails action
       function filterBtn_(id, label) {
         var cls = (activeFilter === id) ? ' active' : '';
         return '<button class="filter-btn' + cls + '" onclick="setFilter(\'' + id + '\')">' + label + '</button>';
@@ -1738,7 +1822,11 @@
           filterBtn_('all', 'All (' + preFilterCount + ')') +
           filterBtn_('unpaid', 'Unpaid (' + unpaidCount + ')') +
           filterBtn_('paid', 'Paid (' + paidCount + ')') +
+          filterBtn_('eligible', 'Eligible (' + eligibleCount + ')') +
+          filterBtn_('ineligible', 'Ineligible (' + ineligibleCount + ')') +
+          filterBtn_('unconfirmed', 'Unconfirmed (' + unconfirmedCount + ')') +
           filterBtn_('qualified', 'Qualified (' + qualifiedCount + ')') +
+          '<button class="filter-btn" onclick="copyEmails()" title="Copy emails of currently visible players to clipboard">&#128203; Copy Emails</button>' +
         '</div>';
 
       // Build table — First and Last name are separate sortable columns
@@ -1748,7 +1836,7 @@
           '<th>Member #</th>' +
           '<th class="sortable' + sortClass_('firstName') + '" data-sort="firstName" onclick="handleSort(this)">First</th>' +
           '<th class="sortable' + sortClass_('lastName') + '" data-sort="lastName" onclick="handleSort(this)">Last</th>' +
-          '<th>' + esc(slHeader) + '</th>' +
+          '<th class="sortable' + sortClass_('sl') + '" data-sort="sl" onclick="handleSort(this)">' + esc(slHeader) + '</th>' +
           '<th>Payment</th>' +
           '<th>Eligibility</th>' +
           '<th>Singles</th>' +
@@ -2489,7 +2577,7 @@
             csvEscape(reg.firstName || ''),
             csvEscape(reg.lastName || ''),
             csvEscape(reg.memberNumber),
-            csvEscape(reg.email),
+            csvEscape((reg.email || '').replace(/\s/g, '')),
             csvEscape(reg.phone),
             csvEscape(reg.sl8 || ''),
             csvEscape(reg.sl9 || ''),
