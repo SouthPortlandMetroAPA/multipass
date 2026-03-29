@@ -425,6 +425,41 @@
       cursor: not-allowed;
     }
 
+    /* -- Filter bar (All / Unpaid / Paid / Qualified) -- */
+    .filter-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .filter-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 16px;
+      border-radius: 999px;
+      border: 1px solid #dee2e6;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      font-family: inherit;
+      background: #fff;
+      color: #6c757d;
+      min-height: 36px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .filter-btn:hover {
+      border-color: #adb5bd;
+      background: #f8f9fa;
+    }
+    .filter-btn.active {
+      background: var(--spm-accent, #0031a1);
+      color: #fff;
+      border-color: var(--spm-accent, #0031a1);
+    }
+
     /* -- Payment Summary Box -- */
     .payment-summary {
       background: #f8f9fa;
@@ -1465,7 +1500,8 @@
      * dir: 'asc' or 'desc'.
      */
     var currentSort = { key: '', dir: 'asc' };
-    var hidePaid = false;  // Filter toggle: hide rows with a paymentMethod set
+    // Row filter: 'all' | 'unpaid' | 'paid' | 'qualified'
+    var activeFilter = 'all';
 
     /**
      * Handles a sortable column header click.
@@ -1491,9 +1527,12 @@
       renderSelectedEvent();
     }
 
-    /** Toggle the "hide paid" filter and re-render. */
-    function toggleHidePaid() {
-      hidePaid = !hidePaid;
+    /**
+     * Set the active row filter and re-render.
+     * @param {string} filter - 'all' | 'unpaid' | 'paid' | 'qualified'
+     */
+    function setFilter(filter) {
+      activeFilter = (activeFilter === filter) ? 'all' : filter;
       renderSelectedEvent();
     }
 
@@ -1664,24 +1703,32 @@
         '</div>' +
       '</div>';
 
-      // Filter: hide paid rows when toggle is active
-      if (hidePaid) {
-        sortedRegs = sortedRegs.filter(function(reg) {
-          return !reg.paymentMethod;
-        });
+      // Apply active row filter
+      var preFilterCount = sortedRegs.length;
+      if (activeFilter === 'unpaid') {
+        sortedRegs = sortedRegs.filter(function(reg) { return !reg.paymentMethod; });
+      } else if (activeFilter === 'paid') {
+        sortedRegs = sortedRegs.filter(function(reg) { return !!reg.paymentMethod; });
+      } else if (activeFilter === 'qualified') {
+        sortedRegs = sortedRegs.filter(function(reg) { return reg.singlesRegionals === 'yes'; });
       }
+      var hiddenCount = preFilterCount - sortedRegs.length;
+
+      // Filter buttons — pill bar with 4 options
+      function filterBtn_(id, label) {
+        var cls = (activeFilter === id) ? ' active' : '';
+        return '<button class="filter-btn' + cls + '" onclick="setFilter(\'' + id + '\')">' + label + '</button>';
+      }
+      var filterBarHtml =
+        '<div class="filter-bar">' +
+          filterBtn_('all', 'All (' + preFilterCount + ')') +
+          filterBtn_('unpaid', 'Unpaid (' + unpaidCount + ')') +
+          filterBtn_('paid', 'Paid (' + paidCount + ')') +
+          filterBtn_('qualified', 'Qualified') +
+        '</div>';
 
       // Build table — First and Last name are separate sortable columns
-      var filterBtnLabel = hidePaid ? 'Show All' : 'Hide Paid';
-      var filterBtnClass = hidePaid ? ' active' : '';
-      var html = detailsHtml + summaryHtml +
-        '<div style="display:flex;justify-content:flex-end;margin-bottom:8px;">' +
-          '<button class="pay-btn' + filterBtnClass + '" ' +
-            'onclick="toggleHidePaid()" ' +
-            'style="font-size:0.7rem;padding:6px 14px;min-height:36px;">' +
-            filterBtnLabel + ' (' + (regs.length - sortedRegs.length) + ' hidden)' +
-          '</button>' +
-        '</div>' +
+      var html = detailsHtml + summaryHtml + filterBarHtml +
         '<div class="reg-table-wrap"><table class="reg-table">' +
         '<thead><tr>' +
           '<th>Member #</th>' +
