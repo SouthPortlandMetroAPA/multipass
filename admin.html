@@ -446,17 +446,21 @@
       color: #6c757d;
       margin-bottom: 12px;
     }
-    .payment-summary-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px 16px;
+    .payment-summary-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
       margin-bottom: 12px;
     }
     .payment-summary-method {
       display: flex;
       justify-content: space-between;
       font-size: 0.8rem;
-      padding: 4px 0;
+      padding: 6px 0;
+      border-bottom: 1px solid #e9ecef;
+    }
+    .payment-summary-method:last-child {
+      border-bottom: none;
     }
     .payment-summary-label {
       color: #495057;
@@ -476,6 +480,15 @@
       padding: 4px 0;
     }
     .payment-summary-row strong {
+      color: #495057;
+    }
+    .payment-summary-grand {
+      font-size: 0.95rem;
+      padding: 8px 0 4px;
+      border-top: 1px solid #dee2e6;
+      margin-top: 4px;
+    }
+    .payment-summary-grand strong {
       color: #28a745;
     }
     .payment-summary-unpaid strong {
@@ -1593,7 +1606,9 @@
 
       // ── Payment summary: count paid per method, compute totals ────────
       // Uses ALL registrations (not filtered copy) so numbers are always correct.
-      var perPlayer = (qual.entryFee || 50) + (qual.greensFee || 3);
+      var entryFee  = qual.entryFee != null ? qual.entryFee : 50;
+      var greensFee = qual.greensFee != null ? qual.greensFee : 3;
+      var perPlayer = entryFee + greensFee;
       var methodTotals = {};    // { Cash: count, Venmo: count, ... }
       var paidCount = 0;
       var unpaidCount = 0;
@@ -1606,31 +1621,42 @@
           unpaidCount++;
         }
       }
-      var grandTotal = paidCount * perPlayer;
+      var totalEntry  = paidCount * entryFee;
+      var totalGreens = paidCount * greensFee;
+      var grandTotal  = totalEntry + totalGreens;
 
-      // Build summary box HTML
+      // Build summary box — stacked list layout
       var summaryHtml = '<div class="payment-summary">' +
         '<div class="payment-summary-title">Payment Summary</div>' +
         '<div class="payment-summary-fees">' +
-          '$' + (qual.entryFee || 50) + ' entry + $' + (qual.greensFee || 3) + ' greens = <strong>$' + perPlayer + '</strong> per player' +
-        '</div>' +
-        '<div class="payment-summary-grid">';
+          '$' + entryFee + ' entry + $' + greensFee + ' greens = <strong>$' + perPlayer + '</strong> per player' +
+        '</div>';
 
+      // Stacked list: one row per payment method
       var methodOrder = ['Cash', 'CashApp', 'Venmo', 'PayPal'];
+      summaryHtml += '<div class="payment-summary-stack">';
       for (var mi2 = 0; mi2 < methodOrder.length; mi2++) {
         var mName = methodOrder[mi2];
         var mCount = methodTotals[mName] || 0;
         var mTotal = mCount * perPlayer;
         summaryHtml += '<div class="payment-summary-method">' +
           '<span class="payment-summary-label">' + mName + '</span>' +
-          '<span class="payment-summary-value">' + mCount + ' &times; $' + perPlayer + ' = <strong>$' + mTotal + '</strong></span>' +
+          '<span class="payment-summary-value">' + mCount + ' player' + (mCount !== 1 ? 's' : '') + ' &mdash; <strong>$' + mTotal + '</strong></span>' +
         '</div>';
       }
+      summaryHtml += '</div>';
 
-      summaryHtml += '</div>' +
+      // Totals section: entry fees, greens fees, grand total, unpaid
+      summaryHtml +=
         '<div class="payment-summary-totals">' +
           '<div class="payment-summary-row">' +
-            '<span>Paid</span><strong>' + paidCount + ' player' + (paidCount !== 1 ? 's' : '') + ' &mdash; $' + grandTotal + '</strong>' +
+            '<span>Entry Fees (' + paidCount + ' &times; $' + entryFee + ')</span><strong>$' + totalEntry + '</strong>' +
+          '</div>' +
+          '<div class="payment-summary-row">' +
+            '<span>Greens Fees (' + paidCount + ' &times; $' + greensFee + ')</span><strong>$' + totalGreens + '</strong>' +
+          '</div>' +
+          '<div class="payment-summary-row payment-summary-grand">' +
+            '<span>Total Collected</span><strong>' + paidCount + ' player' + (paidCount !== 1 ? 's' : '') + ' &mdash; $' + grandTotal + '</strong>' +
           '</div>' +
           '<div class="payment-summary-row payment-summary-unpaid">' +
             '<span>Not Paid (did not attend)</span><strong>' + unpaidCount + ' player' + (unpaidCount !== 1 ? 's' : '') + '</strong>' +
