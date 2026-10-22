@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<!--
+  MultiPass — South Portland Metro APA · singles-qualifier sign-up (v1.0, rebuilt 2026-10-22)
+  ─────────────────────────────────────────────────────────────────────────────
+  Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md (Spiral, High). Guard: tools/claude/validate-multipass.mjs.
+  WHO   anyone can SEE the open qualifiers (anon read of multipass.events; RLS shows only enabled, non-test rows).
+        A signed-in member (shared sign-in, spm-auth.js — one session across every SPM app) registers or cancels
+        THEMSELF. Rostered players self-register; the league office confirms the "10 scores in 2 years" rule in
+        Slate ▸ MultiPass and adds walk-ins / out-of-area players there.
+  DATA  writes only through the apa-mailer GAS (text/plain POST, never application/json):
+        mp_context · mp_register · mp_cancel (+ auth_* via spm-auth.js). The server takes identity from the
+        session, never from this page, and re-checks every rule; this page only explains what it says.
+        Direct Supabase reads: multipass.events (anon, public schedule), apa_core.apps (updater), apa_core.app_pulse.
+  MAIL  confirmation + cancellation, each with a calendar invite (REQUEST / CANCEL), from the server.
+  Brand: spm-base.css. Auto-updater: apa_core.apps row "MultiPass" / "MultiPass-preprod" → version.js (serve-then-bump).
+  Preprod: same file; IS_PREPROD from the URL; asks the server for is_test fixture events (testers only).
+  Copy rule: no em-dashes in anything a player reads.
+  Replaces the legacy GAS + Sheets MultiPass (no sign-in, stale eligibility) at the same URL.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>MultiPass · South Portland Metro APA</title>
+<meta name="description" content="Sign up for South Portland Metro APA singles qualifiers.">
+<meta name="theme-color" content="#ea002a">
+<meta property="og:title" content="MultiPass · SPM APA singles qualifiers">
+<meta property="og:description" content="Sign up for South Portland Metro APA singles qualifiers. Win a board, go to Regionals.">
+<meta property="og:image" content="https://southportlandmetroapa.github.io/multipass/og-image.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8E%B1%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://southportlandmetroapa.github.io/shared/spm-base.css">
+<script src="version.js"></script>
+<script src="https://southportlandmetroapa.github.io/shared/spm-auth.js"></script>
+<style>
+  [hidden]{ display:none !important; }
+  .spm-page{ max-width:640px; }
+  .lead{ color:var(--muted); margin:2px 0 16px; font-size:1rem; line-height:1.5; }
+  .lbl{ font-weight:800; font-size:1.02rem; margin:20px 0 8px; display:block; color:var(--text); }
+  .sub{ color:var(--muted); font-size:.88rem; margin:0 0 8px; }
+  input[type=text]{ width:100%; font:inherit; padding:12px 16px; border:2px solid var(--border); border-radius:12px; background:#fff; min-height:48px; color:var(--text); box-sizing:border-box; }
+  input:focus{ outline:none; border-color:var(--spm-accent); }
+  .btn{ width:100%; font:inherit; font-weight:800; font-size:1.05rem; border:none; border-radius:999px; padding:12px 20px; min-height:52px; cursor:pointer; background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent)); color:#fff; margin-top:12px; }
+  .btn:disabled{ background:#c9ccd6; cursor:not-allowed; }
+  .btn.ghost{ background:#fff; color:var(--text); border:2px solid var(--border); }
+  .btn.small{ width:auto; min-height:48px; font-size:.98rem; padding:8px 20px; margin-top:0; }
+  .err{ color:var(--spm-primary); font-size:.92rem; min-height:1.2em; margin:8px 0 0; }
+  .ok-msg{ color:#0a7d33; font-weight:700; font-size:.95rem; margin:8px 0 0; }
+  .fine{ color:var(--muted); font-size:.82rem; text-align:center; margin:12px 0 0; }
+  .hp{ position:absolute; left:-9999px; width:1px; height:1px; opacity:0; }
+  .ctl{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0 0 12px; }
+  .ctl button{ background:none; border:none; color:var(--spm-accent); font:inherit; font-weight:700; cursor:pointer; min-height:48px; padding:8px 0; }
+  .spin{ display:inline-block; width:28px; height:28px; border:3px solid #e5e7eb; border-top-color:var(--spm-primary); border-radius:50%; animation:spin 1s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .center{ padding:24px 8px; text-align:center; }
+  /* status strip per format */
+  .fmt-status{ border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin:0 0 12px; font-size:.95rem; line-height:1.45; }
+  .fmt-status b{ font-weight:800; }
+  .fmt-status.good{ background:#f0faf3; border-color:#bfe6cb; }
+  .fmt-status.warn{ background:#fff8e1; border-color:#f0e0a8; }
+  .fmt-status.stop{ background:#fdf0f1; border-color:#f3c3c9; }
+  /* event cards */
+  .ev{ border:1px solid var(--border); border-radius:12px; padding:16px; margin:0 0 12px; background:#fff; box-shadow:0 3px 10px rgba(0,0,0,.06); }
+  .ev.mine{ border-color:#7fb08e; box-shadow:0 0 0 2px #cfe9d7 inset; }
+  .ev-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .ev-date{ font-weight:800; font-size:1.15rem; line-height:1.3; }
+  .pill{ display:inline-block; font-size:.78rem; font-weight:800; letter-spacing:.03em; padding:4px 12px; border-radius:999px; background:#e7edfb; color:#0031a1; white-space:nowrap; }
+  .pill.nine{ background:#fde8ec; color:#b0001f; }
+  .pill.test{ background:#fff3cd; color:#7a5a00; margin-left:4px; }
+  .ev-line{ margin:8px 0 0; font-size:.95rem; line-height:1.45; color:var(--text); }
+  .ev-line a{ color:var(--spm-accent); font-weight:600; }
+  .ev-muted{ color:var(--muted); }
+  .ev-state{ margin:12px 0 0; font-size:.95rem; font-weight:700; }
+  .ev-state.in{ color:#0a7d33; }
+  .ev-why{ margin:12px 0 0; font-size:.92rem; color:#7a5a00; background:#fff8e1; border:1px solid #f0e0a8; border-radius:8px; padding:8px 12px; line-height:1.45; }
+  .ev-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .empty{ border:1px dashed var(--border); border-radius:12px; padding:24px 16px; text-align:center; color:var(--muted); }
+  .how{ border-top:1px solid var(--border); margin-top:20px; padding-top:12px; font-size:.92rem; line-height:1.5; color:var(--text); }
+  .how h2{ font-size:1rem; margin:0 0 8px; }
+  .how ul{ margin:0; padding-left:20px; }
+  .how li{ margin:0 0 4px; }
+  .banner{ border-radius:12px; padding:12px 16px; margin:0 0 12px; font-size:.95rem; background:#fff8e1; border:1px solid #f0e0a8; color:#5c4400; }
+  /* confirm modal (ShortRack / FairPlay note pattern) */
+  .note-back{ position:fixed; inset:0; background:rgba(20,30,50,.55); z-index:200; display:flex; align-items:center; justify-content:center; padding:16px; overflow-y:auto; }
+  @media (max-height:560px){ .note-back{ align-items:flex-start; } }
+  .note{ background:#fff; border-radius:16px; max-width:420px; width:100%; padding:20px; box-shadow:0 12px 40px rgba(0,0,0,.25); margin:auto; }
+  .note h2{ margin:0 0 8px; font-size:1.15rem; }
+  .note p{ margin:0 0 12px; font-size:17px; line-height:1.5; }
+  #updateOverlay{ position:fixed; inset:0; background:rgba(255,255,255,.96); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:12px; text-align:center; padding:24px; }
+  #updateOverlay.show{ display:flex; }
+</style>
+</head>
+<body>
+  <div id="updateOverlay"><div class="spin"></div><div><b>Updating…</b><br>Grabbing the latest version.</div></div>
+  <div class="spm-page spm-wide">
+    <header class="spm-header">
+      <h1>MultiPass 🎱</h1>
+      <p class="spm-subtitle">South Portland Metro APA · singles qualifiers</p>
+    </header>
+    <div class="spm-shell">
+      <main class="spm-card">
+        <div class="ctl" id="ctl" hidden><span id="whoami" class="sub" style="margin:0"></span><button type="button" id="logout">Log out</button></div>
+        <div id="msg" aria-live="polite"></div>
+        <div id="app"></div>
+      </main>
+      <aside class="spm-rail" id="rail" aria-live="polite"></aside>
+    </div>
+    <div class="spm-footer">MultiPass v<span id="verLabel"></span> · South Portland Metro APA</div>
+  </div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const SB_URL  = 'https://dqzbekoaysgaiqljueac.supabase.co';
+  const ANON    = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxemJla29heXNnYWlxbGp1ZWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNzA5NzgsImV4cCI6MjA5MDc0Njk3OH0.cCdGxZ4zEFzU_r6lWSDeoNWG67Q4MSYCAtpds035dfU';
+  const GAS_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
+  /* Environment is derived from the URL, never hardcoded, so the same file serves both places. Each environment
+     polls its OWN apa_core.apps row (CountMeIn pattern). */
+  const APP_NAME_BASE = 'MultiPass';
+  const IS_PREPROD    = /\/preprod\//.test(location.pathname);
+  const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
+  const TZ = 'America/Los_Angeles';
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  /* GAS: text/plain body, never application/json (CORS preflight GAS cannot answer) */
+  const gas = (action, extra) => fetch(GAS_URL, { method: 'POST', body: JSON.stringify(Object.assign({ action }, extra || {})) })
+    .then(r => r.json()).catch(() => ({ ok: false, error: 'Network hiccup. Check your connection and try again.' }));
+  const S = { token: null, firstName: '', me: null, events: [], maintenance: false, busy: false, flash: null };
+  const app = $('app');
+  $('verLabel').textContent = window.APP_VERSION + (IS_PREPROD ? ' preprod' : '');
+  if (IS_PREPROD) {
+    const bar = document.createElement('div');
+    bar.setAttribute('data-preprod-banner', '1');
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;'
+      + 'background:#b45309;color:#fff;font:700 13px/1.35 system-ui,sans-serif;'
+      + 'padding:8px 12px;text-align:center;letter-spacing:.02em';
+    bar.textContent = 'PREPROD test page. Registrations here are written to the REAL database and email the signed-in player. Do not share this link.';
+    document.addEventListener('DOMContentLoaded', () => { document.body.appendChild(bar); document.body.style.paddingTop = '36px'; });
+  }
+
+  /* ── formatting (Pacific time, always) ── */
+  const fmtLabel = f => f === '9' ? '9-Ball' : '8-Ball';
+  const dPart = (iso, o) => new Intl.DateTimeFormat('en-US', Object.assign({ timeZone: TZ }, o)).format(new Date(iso));
+  const dayText = iso => dPart(iso, { weekday: 'short', month: 'short', day: 'numeric' });
+  const longDay = iso => dPart(iso, { weekday: 'long', month: 'long', day: 'numeric' });
+  const timeText = iso => dPart(iso, { hour: 'numeric', minute: '2-digit' });
+  const money = n => '$' + (Number(n) % 1 ? Number(n).toFixed(2) : String(Number(n)));
+  const mapUrl = e => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([e.venue_name, e.venue_address].filter(Boolean).join(', '));
+  /* An event is over once its last boards have started plus a little play time (or 9 h after the start). */
+  const isOver = e => Date.now() > (e.last_board_at ? Date.parse(e.last_board_at) + 2 * 3600e3 : Date.parse(e.starts_at) + 9 * 3600e3);
+
+  /* ── shared pieces ── */
+  function howItWorks() {
+    return '<div class="how"><h2>How a Play Til You Win qualifier works</h2><ul>'
+      + '<li><b>Four-player boards, single elimination.</b> Win your board and you qualify for the Singles Regionals.</li>'
+      + '<li><b>Lose and play again.</b> Enter another board for free, until you qualify or decide you are done.</li>'
+      + '<li><b>One payment covers the day.</b> Pay at the door, cash or Venmo. A new day is a new entry fee.</li>'
+      + '<li><b>Who can play:</b> APA members 18 and over, on an active team in that format, with at least 10 league match scores in that format in the last two years.</li>'
+      + '<li><b>Walk-ins are welcome.</b> Signing up here just helps us plan boards.</li></ul></div>';
+  }
+  function cardHtml(e, signedIn) {
+    const nine = e.format === '9';
+    const where = e.venue_name ? '<a href="' + mapUrl(e) + '" target="_blank" rel="noopener">' + esc(e.venue_name) + '</a>'
+      + (e.venue_address ? '<br><span class="ev-muted">' + esc(e.venue_address) + '</span>' : '') : '<span class="ev-muted">Venue to be announced</span>';
+    const cost = money(Number(e.entry_fee) + Number(e.greens_fee));
+    let html = '<div class="ev' + (e.my_status === 'registered' ? ' mine' : '') + '" data-ev="' + e.id + '">'
+      + '<div class="ev-top"><div class="ev-date">' + esc(dayText(e.starts_at)) + '</div><div><span class="pill' + (nine ? ' nine' : '') + '">' + fmtLabel(e.format) + '</span>'
+      + (e.is_test ? '<span class="pill test">TEST</span>' : '') + '</div></div>'
+      + '<p class="ev-line">Doors open ' + esc(timeText(e.starts_at)) + (e.last_board_at ? '. Last new boards start at ' + esc(timeText(e.last_board_at)) : '') + '.</p>'
+      + '<p class="ev-line">' + where + '</p>'
+      + '<p class="ev-line">' + cost + ' for the day <span class="ev-muted">(' + money(e.entry_fee) + ' entry plus ' + money(e.greens_fee) + ' greens fee), pay at the door</span></p>';
+    if (!signedIn) return html + '</div>';
+    if (e.my_status === 'registered') {
+      html += '<p class="ev-state in">You are registered. ' + (e.paid ? 'Paid.' : 'Pay at the door.') + '</p>'
+        + (e.qualified ? '<div class="ev-why">You already qualified in ' + fmtLabel(e.format) + ', so you do not need this one. Cancel it to free up the spot.</div>' : '')
+        + '<div class="ev-actions"><button type="button" class="btn ghost small" data-cancel="' + e.id + '">Cancel my spot</button></div>';
+    } else if (e.can_register) {
+      html += '<div class="ev-actions"><button type="button" class="btn small" data-reg="' + e.id + '">Sign me up</button></div>';
+    } else if (e.why_text) {
+      html += '<div class="ev-why">' + esc(e.why_text) + '</div>';
+    }
+    return html + '</div>';
+  }
+
+  /* ── signed out: the public schedule + sign-in ── */
+  async function loadPublic() {
+    try {
+      const r = await fetch(SB_URL + '/rest/v1/events?select=id,format,title,starts_at,last_board_at,venue_name,venue_address,entry_fee,greens_fee,regionals_season&order=starts_at',
+        { headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Accept-Profile': 'multipass' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return (await r.json()).filter(e => !isOver(e));
+    } catch (e) { return null; }
+  }
+  async function showSignedOut(msg) {
+    S.token = null; S.me = null; renderRail();
+    $('ctl').hidden = true;
+    app.innerHTML = '<div class="center"><span class="spin"></span></div>';
+    const evs = await loadPublic();
+    if (S.token) return;   /* signed in while we were loading */
+    const list = evs === null ? '<div class="empty">We could not load the schedule. <button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>'
+      : evs.length ? evs.map(e => cardHtml(e, false)).join('')
+      : '<div class="empty">No qualifiers are open for sign-up right now. Check the league calendar for what is coming up.</div>';
+    app.innerHTML = '<p class="lead">Sign up for an SPM singles qualifier. Win a board and you go to the Singles Regionals.</p>'
+      + (msg ? '<div class="err" style="margin:0 0 12px">' + esc(msg) + '</div>' : '')
+      + '<div id="signin" style="margin-bottom:16px"><label class="lbl" for="ident" style="margin-top:0">Sign in to sign up</label>'
+      + '<p class="sub">Use the email or APA number on your record. We email you a link, no password. If you are signed in to another SPM app on this device, you are already signed in here.</p>'
+      + '<input id="ident" type="text" autocomplete="email" inputmode="email" placeholder="you@example.com or 97212345">'
+      + '<input class="hp" type="text" name="website" id="hp" tabindex="-1" autocomplete="off" aria-hidden="true">'
+      + '<div class="err" id="err"></div><button type="button" class="btn" id="send">Email me a sign-in link</button>'
+      + '<p class="fine">The link goes only to the email on your APA record.</p></div>'
+      + '<span class="lbl">Open qualifiers</span>' + list + howItWorks();
+    if ($('retry')) $('retry').onclick = () => showSignedOut();
+    $('send').onclick = async () => {
+      const v = $('ident').value.trim(); if (!v) { $('err').textContent = 'Enter your email or APA number.'; return; }
+      $('send').disabled = true; $('err').textContent = '';
+      const r = await spmAuth.requestLink(v, 'multipass', $('hp').value);
+      if (!r.ok) { $('err').textContent = r.error || 'Something went wrong.'; $('send').disabled = false; return; }
+      $('signin').innerHTML = '<h2 style="margin:0 0 8px">Check your email' + (r.first_name ? ', ' + esc(r.first_name) : '') + '.</h2>'
+        + '<p class="lead">We sent a sign-in link to the address on your APA record. It works for 30 minutes and keeps you signed in on this device.</p>'
+        + '<button type="button" class="btn ghost" id="again">Use a different email or number</button>';
+      $('again').onclick = () => showSignedOut();
+    };
+  }
+
+  /* ── signed in ── */
+  function formatStatus(evs) {
+    const out = [];
+    ['8', '9'].forEach(f => {
+      const mine = evs.filter(e => e.format === f);
+      if (!mine.length) return;
+      const L = fmtLabel(f);
+      if (mine.some(e => e.qualified)) { out.push('<div class="fmt-status good"><b>' + L + ': you qualified for Regionals.</b> Congratulations. No need to play another ' + L + ' qualifier.</div>'); return; }
+      if (mine.some(e => e.why === 'not_rostered')) { out.push('<div class="fmt-status stop"><b>' + L + ': we do not see you on a ' + L + ' team this session.</b> You need one to sign up online. If that is wrong, contact the league office and we will add you.</div>'); return; }
+      const el = (mine.find(e => e.eligibility) || {}).eligibility || 'unconfirmed';
+      if (el === 'ineligible') out.push('<div class="fmt-status stop"><b>' + L + ': the league office has you as not eligible.</b> If that is wrong, contact the office.</div>');
+      else if (el === 'eligible') out.push('<div class="fmt-status good"><b>' + L + ': you are all set.</b> The league office confirmed you meet the singles rules.</div>');
+      else out.push('<div class="fmt-status warn"><b>' + L + ': you can sign up.</b> The league office still confirms the rule of at least 10 league match scores in ' + L + ' in the last two years. We will be in touch if there is a problem.</div>');
+    });
+    return out.join('');
+  }
+  async function loadSignedIn() {
+    const r = await gas('mp_context', { token: S.token, include_test: IS_PREPROD });
+    if (!r.ok) { if (spmAuth.isAuthErr(r.error)) return handleSessionErr(r.error); return { error: r.error || 'Could not load your qualifiers.' }; }
+    S.me = r.me; S.maintenance = !!r.maintenance;
+    S.events = (r.events || []).filter(e => !isOver(e));
+    return { ok: true };
+  }
+  async function showSignedIn() {
+    $('ctl').hidden = false; $('whoami').textContent = S.firstName ? 'Signed in as ' + S.firstName : 'Signed in';
+    if (!S.me) app.innerHTML = '<div class="center"><span class="spin"></span><p class="sub" style="margin-top:12px">Loading your qualifiers…</p></div>';
+    const res = await loadSignedIn();
+    if (!res) return;   /* session ended → handled */
+    if (res.error) { app.innerHTML = '<div class="empty">' + esc(res.error) + '<br><button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>'; $('retry').onclick = showSignedIn; return; }
+    render();
+  }
+  function render() {
+    const evs = S.events;
+    const flash = S.flash ? '<div class="' + (S.flash.ok ? 'ok-msg' : 'err') + '" style="margin:0 0 12px">' + esc(S.flash.text) + '</div>' : '';
+    app.innerHTML = (S.maintenance ? '<div class="banner"><b>Sign-ups are paused for a few minutes.</b> Please try again shortly.</div>' : '')
+      + flash + formatStatus(evs)
+      + (evs.length ? evs.map(e => cardHtml(e, true)).join('')
+                    : '<div class="empty">No qualifiers are open for sign-up right now. Check the league calendar for what is coming up.</div>')
+      + howItWorks();
+    app.querySelectorAll('[data-reg]').forEach(b => b.onclick = () => register(+b.dataset.reg));
+    app.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => confirmCancel(+b.dataset.cancel));
+    renderRail();
+  }
+  function setBusy(on) { S.busy = on; app.querySelectorAll('button[data-reg],button[data-cancel]').forEach(b => b.disabled = on); }
+  async function register(id) {
+    if (S.busy) return;                       /* a double tap sends one request; the server's UNIQUE is the real guard */
+    const e = S.events.find(x => x.id === id); if (!e) return;
+    setBusy(true); S.flash = null;
+    const r = await gas('mp_register', { token: S.token, event_id: id });
+    if (!r.ok && spmAuth.isAuthErr(r.error)) { setBusy(false); return handleSessionErr(r.error); }
+    S.flash = r.ok ? { ok: true, text: 'You are signed up for ' + longDay(e.starts_at) + ' (' + fmtLabel(e.format) + '). We emailed you a confirmation with a calendar invite.' }
+                   : { ok: false, text: r.error || 'Something went wrong. Try again.' };
+    setBusy(false); await showSignedIn();
+  }
+  function confirmCancel(id) {
+    const e = S.events.find(x => x.id === id); if (!e || S.busy) return;
+    const back = document.createElement('div'); back.className = 'note-back';
+    back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true'); back.setAttribute('aria-labelledby', 'noteTitle');
+    back.innerHTML = '<div class="note"><h2 id="noteTitle">Cancel your spot?</h2>'
+      + '<p><b>' + esc(longDay(e.starts_at)) + ', ' + fmtLabel(e.format) + '.</b> You can sign up again any time before registration closes, and walk-ins are welcome on the day.</p>'
+      + '<button type="button" class="btn" id="yesCancel">Yes, cancel my spot</button><button type="button" class="btn ghost" id="keep">Keep my spot</button></div>';
+    document.body.appendChild(back);
+    const close = () => back.remove();
+    $('keep').onclick = close;
+    back.addEventListener('click', ev => { if (ev.target === back) close(); });
+    document.addEventListener('keydown', function k(ev) { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', k); } });
+    $('yesCancel').onclick = async () => {
+      $('yesCancel').disabled = true; $('keep').disabled = true;
+      setBusy(true); S.flash = null;
+      const r = await gas('mp_cancel', { token: S.token, event_id: id });
+      close(); setBusy(false);
+      if (!r.ok && spmAuth.isAuthErr(r.error)) return handleSessionErr(r.error);
+      S.flash = r.ok ? { ok: true, text: 'Cancelled. We emailed you a calendar update that removes it.' } : { ok: false, text: r.error || 'Something went wrong. Try again.' };
+      await showSignedIn();
+    };
+    $('keep').focus();
+  }
+  /* Desktop rail: what you are signed up for (spm-base .spm-rail; hidden below 1200px). */
+  function renderRail() {
+    const rail = $('rail'); if (!rail) return;
+    if (!S.token || !S.me) { rail.innerHTML = ''; return; }
+    const mine = S.events.filter(e => e.my_status === 'registered');
+    rail.innerHTML = '<div class="spm-rail-card"><h3>Your qualifiers</h3>'
+      + (mine.length ? '<dl>' + mine.map(e => '<dt>' + esc(dayText(e.starts_at)) + '</dt><dd>' + fmtLabel(e.format) + ' at ' + esc(e.venue_name || 'TBA') + (e.paid ? ', paid' : '') + '</dd>').join('') + '</dl>'
+                     : '<p class="spm-rail-note">You are not signed up for any yet.</p>')
+      + '<p class="spm-rail-note"><b>Lose a board? Play again.</b> One payment covers every board you play that day.</p></div>';
+  }
+
+  /* ── session ── */
+  function handleSessionErr(msg) { spmAuth.clear(); S.token = null; S.me = null; showSignedOut(msg || 'Your session expired. Sign in again.'); }
+  $('logout').onclick = () => { spmAuth.logout(S.token); S.firstName = ''; showSignedOut(); };
+  function boot() {
+    app.innerHTML = '<div class="center"><span class="spin"></span><p class="sub" style="margin-top:12px">Loading the qualifiers…</p></div>';
+    spmAuth.boot({ app: 'multipass' }).then(r => {
+      if (!r.signedIn) return showSignedOut(r.error || '');
+      S.token = r.token; S.firstName = r.first_name || '';
+      showSignedIn();
+    });
+  }
+
+  /* ── Auto-updater (checkVersion → pollForDeploy; reference_deploy.md) ── */
+  function cmpVer(a, b) { const pa = String(a).split('.'), pb = String(b).split('.'); for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const x = parseInt(pa[i], 10) || 0, y = parseInt(pb[i], 10) || 0; if (x > y) return 1; if (x < y) return -1; } return 0; }
+  let _versionMismatch = false;
+  async function checkVersion() {
+    try { const r = await fetch(SB_URL + '/rest/v1/apps?app_name=eq.' + APP_NAME + '&select=version', { headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Accept-Profile': 'apa_core' } }); const rows = await r.json(); const v = rows && rows[0] && rows[0].version;
+      if (v && cmpVer(v, window.APP_VERSION) > 0 && !_versionMismatch) { if (S.busy || document.querySelector('.note-back') || document.activeElement === $('ident')) return; _versionMismatch = true; $('updateOverlay').classList.add('show'); pollForDeploy(); } } catch (e) {}
+  }
+  function pollForDeploy() { const t = setInterval(async () => { try { const r = await fetch('version.js?_=' + Date.now(), { cache: 'no-store' }); const m = (await r.text()).match(/APP_VERSION\s*=\s*'([^']+)'/); if (m && cmpVer(m[1], window.APP_VERSION) > 0) { clearInterval(t); location.reload(); } } catch (e) {} }, 15000); }
+  setInterval(checkVersion, 30000);
+
+/* ── Live data refresh (apa_core.app_pulse) ─────────────────────────────────────────────────────────
+   House rule: an open page whose data changes must poll and re-render, with version updates separate.
+   Signed in: one hash over the public schedule PLUS this member's registrations, eligibility and qualified
+   marks (the operator marking "paid" or "eligible" shows up here). Signed out: the schedule only ('index').
+   Skips while a modal is open, a request is in flight, the sign-in box has focus, or the tab is hidden;
+   the first sample only seeds. */
+  let _dataPulse = null;
+  async function fetchDataPulse() {
+    const key = S.me ? S.me.member_number : 'index';
+    try {
+      const r = await fetch(SB_URL + '/rest/v1/rpc/app_pulse', { method: 'POST',
+        headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', 'Accept-Profile': 'apa_core', 'Content-Profile': 'apa_core' },
+        body: JSON.stringify({ p_app: 'multipass', p_key: String(key) }) });
+      return r.ok ? await r.json() : null;
+    } catch (e) { return null; }
+  }
+  async function pollDataPulse() {
+    if (document.hidden || S.busy || document.querySelector('.note-back')) return;
+    if ($('ident') && (document.activeElement === $('ident') || $('ident').value)) return;   /* do not wipe a half-typed sign-in */
+    const p = await fetchDataPulse();
+    if (p === null) return;
+    if (_dataPulse === null) { _dataPulse = p; return; }
+    if (p !== _dataPulse) { _dataPulse = p; if (S.token) { S.flash = null; showSignedIn(); } else showSignedOut(); }
+  }
+  setInterval(pollDataPulse, 20000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) pollDataPulse(); });
+  spmAuth.onChange(function (t) { if ((t || '') !== (S.token || '')) location.reload(); });   /* SSO: another app signed in or out */
+  boot();
+</script>
+</body>
+</html>
