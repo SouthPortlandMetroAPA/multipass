@@ -43,6 +43,8 @@
   .btn{ width:100%; font:inherit; font-weight:800; font-size:1.05rem; border:none; border-radius:999px; padding:12px 20px; min-height:52px; cursor:pointer; background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent)); color:#fff; margin-top:12px; }
   .btn:disabled{ background:#c9ccd6; cursor:not-allowed; }
   .btn.ghost{ background:#fff; color:var(--text); border:2px solid var(--border); }
+  /* in-progress label stays readable: the plain disabled grey was 1.6:1 (nemesis ui lens) */
+  .btn.working:disabled{ background:#4b5563; color:#fff; border-color:#4b5563; }
   .btn.small{ width:auto; min-height:48px; font-size:.98rem; padding:8px 20px; margin-top:0; }
   a.btn{ display:inline-flex; align-items:center; justify-content:center; text-decoration:none; box-sizing:border-box; }
   .err{ color:var(--spm-primary); font-size:.92rem; min-height:1.2em; margin:8px 0 0; }
@@ -121,9 +123,18 @@
   const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
   const TZ = 'America/Los_Angeles';
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-  /* GAS: text/plain body, never application/json (CORS preflight GAS cannot answer) */
-  const gas = (action, extra) => fetch(GAS_URL, { method: 'POST', body: JSON.stringify(Object.assign({ action }, extra || {})) })
-    .then(r => r.json()).catch(() => ({ ok: false, error: 'Network hiccup. Check your connection and try again.' }));
+  /* GAS: text/plain body, never application/json (CORS preflight GAS cannot answer). A 45 s ceiling: the mailer can
+     take 30 s, a bar's wifi can take forever. A network failure says offline:true so callers never mistake it for a
+     sign-in problem or a refusal. */
+  const gas = (action, extra) => {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 45000);
+    return fetch(GAS_URL, { method: 'POST', body: JSON.stringify(Object.assign({ action }, extra || {})), signal: ctl.signal })
+      .then(r => r.json()).catch(() => ({ ok: false, offline: true, error: 'We lost the connection. Check your signal and try again.' }))
+      .finally(() => clearTimeout(t));
+  };
+  /* The league office, reachable from every "contact the office" line (nemesis player lens: a dead end otherwise). */
+  const OFFICE_TEXT = 'https://bit.ly/spmtextus', OFFICE_EMAIL = 'soldans@southportlandmetroapa.com';
+  const CAL_URL = 'https://southportlandmetroapa.github.io/calendarviewer/';
   const S = { token: null, firstName: '', me: null, events: [], maintenance: false, busy: false, loading: false, flash: null };
   const app = $('app');
   $('verLabel').textContent = window.APP_VERSION + (IS_PREPROD ? ' preprod' : '');
@@ -134,7 +145,7 @@
       + 'background:#b45309;color:#fff;font:700 13px/1.35 system-ui,sans-serif;'
       + 'padding:8px 12px;text-align:center;letter-spacing:.02em';
     bar.textContent = 'PREPROD test page. Registrations here are written to the REAL database and email the signed-in player. Do not share this link.';
-    document.addEventListener('DOMContentLoaded', () => { document.body.appendChild(bar); document.body.style.paddingTop = '36px'; });
+    document.addEventListener('DOMContentLoaded', () => { document.body.appendChild(bar); const fit = () => { document.body.style.paddingTop = bar.offsetHeight + 'px'; }; fit(); addEventListener('resize', fit); });
   }
 
   /* ── formatting (Pacific time, always) ── */
@@ -155,7 +166,20 @@
       + '<li><b>Lose and play again.</b> Enter another board for free, until you qualify or decide you are done.</li>'
       + '<li><b>One payment covers the day.</b> Pay at the door, cash or Venmo. A new day is a new entry fee.</li>'
       + '<li><b>Who can play:</b> APA members 18 and over, on an active team in that format, with at least 10 league match scores in that format in the last two years.</li>'
-      + '<li><b>Walk-ins are welcome.</b> Signing up here just helps us plan boards.</li></ul></div>';
+      + '<li><b>Walk-ins are welcome.</b> Signing up here just helps us plan boards.</li></ul></div>'
+      + contactHtml();
+  }
+  function contactHtml() {
+    return '<div class="how" id="contact"><h2>Questions, or something looks wrong?</h2>'
+      + '<p style="margin:0 0 8px">The league office can check your team, your eligibility, or sign you up by hand.</p>'
+      + '<div class="ev-actions"><a class="btn ghost small" href="' + OFFICE_TEXT + '" target="_blank" rel="noopener">Text the league office</a>'
+      + '<a class="btn ghost small" href="mailto:' + OFFICE_EMAIL + '?subject=MultiPass">Email the league office</a>'
+      + '<a class="btn ghost small" href="' + CAL_URL + '" target="_blank" rel="noopener">League calendar</a></div></div>';
+  }
+  function showOffline(retry) {
+    app.innerHTML = '<div class="empty">We could not reach the league server. Check your signal, then try again. You are still signed in.'
+      + '<br><button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>' + contactHtml();
+    $('retry').onclick = retry;
   }
   function cardHtml(e, signedIn) {
     const nine = e.format === '9';
@@ -207,7 +231,7 @@
       + (msg ? '<div class="err" style="margin:0 0 12px">' + esc(msg) + '</div>' : '')
       + '<div id="signin" style="margin-bottom:16px"><label class="lbl" for="ident" style="margin-top:0">Sign in to sign up</label>'
       + '<p class="sub">Use the email or APA number on your record. We email you a link, no password. If you are signed in to another SPM app on this device, you are already signed in here.</p>'
-      + '<input id="ident" type="text" autocomplete="email" inputmode="email" placeholder="you@example.com or 97212345">'
+      + '<input id="ident" type="text" autocomplete="email" inputmode="email" placeholder="Email or APA number">'
       + '<input class="hp" type="text" name="website" id="hp" tabindex="-1" autocomplete="off" aria-hidden="true">'
       + '<div class="err" id="err"></div><button type="button" class="btn" id="send">Email me a sign-in link</button>'
       + '<p class="fine">The link goes only to the email on your APA record.</p></div>'
@@ -233,17 +257,19 @@
       if (!mine.length) return;
       const L = fmtLabel(f);
       if (mine.some(e => e.qualified)) { out.push('<div class="fmt-status good"><b>' + L + ': you qualified for Regionals.</b> Congratulations. No need to play another ' + L + ' qualifier.</div>'); return; }
-      if (mine.some(e => e.why === 'not_rostered')) { out.push('<div class="fmt-status stop"><b>' + L + ': we do not see you on a ' + L + ' team this session.</b> You need one to sign up online. If that is wrong, contact the league office and we will add you.</div>'); return; }
+      /* rostered comes from the server per event; a pause or a cutoff no longer masks "not on a team" */
+      if (!mine.some(e => e.rostered)) { out.push('<div class="fmt-status stop"><b>' + L + ': we do not see you on a ' + L + ' team this session.</b> You need one to sign up online. If that is wrong, contact the league office (buttons below) and we will add you.</div>'); return; }
       const el = (mine.find(e => e.eligibility) || {}).eligibility || 'unconfirmed';
-      if (el === 'ineligible') out.push('<div class="fmt-status stop"><b>' + L + ': the league office has you as not eligible.</b> If that is wrong, contact the office.</div>');
+      const open = mine.some(e => e.can_register || e.my_status === 'registered');
+      if (el === 'ineligible') out.push('<div class="fmt-status stop"><b>' + L + ': the league office has you as not eligible.</b> If that is wrong, contact the office (buttons below).</div>');
       else if (el === 'eligible') out.push('<div class="fmt-status good"><b>' + L + ': you are all set.</b> The league office confirmed you meet the singles rules.</div>');
-      else out.push('<div class="fmt-status warn"><b>' + L + ': you can sign up.</b> The league office still confirms the rule of at least 10 league match scores in ' + L + ' in the last two years. We will be in touch if there is a problem.</div>');
+      else out.push('<div class="fmt-status warn"><b>' + L + (open ? ': you can sign up.' : ': on a team, good.') + '</b> The league office still confirms the rule of at least 10 league match scores in ' + L + ' in the last two years. We will be in touch if there is a problem.</div>');
     });
     return out.join('');
   }
   async function loadSignedIn() {
     const r = await gas('mp_context', { token: S.token, include_test: IS_PREPROD });
-    if (!r.ok) { if (spmAuth.isAuthErr(r.error)) return handleSessionErr(r.error); return { error: r.error || 'Could not load your qualifiers.' }; }
+    if (!r.ok) { if (spmAuth.isAuthErr(r.error)) return handleSessionErr(r.error); return { error: r.error || 'Could not load your qualifiers.', offline: !!r.offline }; }
     S.me = r.me; S.maintenance = !!r.maintenance;
     S.events = (r.events || []).filter(e => !isOver(e));
     return { ok: true };
@@ -256,12 +282,15 @@
     const res = await loadSignedIn().finally(() => { S.loading = false; });
     if (seed) seed.then(p => { if (p !== null) _dataPulse = p; });
     if (!res) return;   /* session ended → handled */
-    if (res.error) { app.innerHTML = '<div class="empty">' + esc(res.error) + '<br><button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>'; $('retry').onclick = showSignedIn; return; }
+    if (res.offline) return showOffline(showSignedIn);
+    if (res.error) { app.innerHTML = '<div class="empty">' + esc(res.error) + '<br><button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>' + contactHtml(); $('retry').onclick = showSignedIn; return; }
     render();
   }
   function render() {
     const evs = S.events;
-    const flash = S.flash ? '<div class="' + (S.flash.ok ? 'ok-msg' : 'err') + '" style="margin:0 0 12px">' + esc(S.flash.text) + '</div>' : '';
+    /* a confirmation is about the moment it happened: it expires, so it never sits above a card that changed since */
+    const fresh = S.flash && Date.now() - S.flash.at < 20000;
+    const flash = fresh ? '<div class="' + (S.flash.ok ? 'ok-msg' : 'err') + '" style="margin:0 0 12px">' + esc(S.flash.text) + '</div>' : '';
     app.innerHTML = (S.maintenance ? '<div class="banner"><b>Sign-ups are paused for a few minutes.</b> Please try again shortly.</div>' : '')
       + flash + formatStatus(evs)
       + (evs.length ? evs.map(e => cardHtml(e, true)).join('')
@@ -276,12 +305,13 @@
     if (S.busy) return;                       /* a double tap sends one request; the server's UNIQUE is the real guard */
     const e = S.events.find(x => x.id === id); if (!e) return;
     setBusy(true); S.flash = null;
-    const btn = app.querySelector('[data-reg="' + id + '"]'); if (btn) btn.textContent = 'Signing you up…';   /* the mailer can take 30 s */
+    const btn = app.querySelector('[data-reg="' + id + '"]'); if (btn) { btn.textContent = 'Signing you up…'; btn.classList.add('working'); }   /* the mailer can take 30 s */
     const r = await gas('mp_register', { token: S.token, event_id: id });
     if (!r.ok && spmAuth.isAuthErr(r.error)) { setBusy(false); return handleSessionErr(r.error); }
-    S.flash = r.ok ? { ok: true, text: 'You are signed up for ' + longDay(e.starts_at) + ' (' + fmtLabel(e.format) + '). We emailed you a confirmation with a calendar invite.' }
-                   : { ok: false, text: r.error || 'Something went wrong. Try again.' };
-    setBusy(false); await showSignedIn();
+    S.flash = { at: Date.now(), ok: !!r.ok, text: r.ok ? 'You are signed up for ' + longDay(e.starts_at) + ' (' + fmtLabel(e.format) + '). We emailed you a confirmation with a calendar invite.'
+      : r.offline ? 'We lost the connection before we heard back. Below is where things stand now. If you are not signed up, try again.'
+      : (r.error || 'Something went wrong. Try again.') };
+    await showSignedIn(); setBusy(false);   /* busy until the fresh state is on screen: no second tap on a stale card */
   }
   function confirmCancel(id) {
     const e = S.events.find(x => x.id === id); if (!e || S.busy) return;
@@ -296,13 +326,15 @@
     back.addEventListener('click', ev => { if (ev.target === back) close(); });
     document.addEventListener('keydown', function k(ev) { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', k); } });
     $('yesCancel').onclick = async () => {
-      $('yesCancel').disabled = true; $('keep').disabled = true; $('yesCancel').textContent = 'Cancelling…';
+      $('yesCancel').disabled = true; $('keep').disabled = true; $('yesCancel').textContent = 'Cancelling…'; $('yesCancel').classList.add('working');
       setBusy(true); S.flash = null;
       const r = await gas('mp_cancel', { token: S.token, event_id: id });
-      close(); setBusy(false);
-      if (!r.ok && spmAuth.isAuthErr(r.error)) return handleSessionErr(r.error);
-      S.flash = r.ok ? { ok: true, text: 'Cancelled. We emailed you a calendar update that removes it.' } : { ok: false, text: r.error || 'Something went wrong. Try again.' };
-      await showSignedIn();
+      close();
+      if (!r.ok && spmAuth.isAuthErr(r.error)) { setBusy(false); return handleSessionErr(r.error); }
+      S.flash = { at: Date.now(), ok: !!r.ok, text: r.ok ? 'Cancelled. We emailed you a calendar update that removes it.'
+        : r.offline ? 'We lost the connection before we heard back. Below is where things stand now.'
+        : (r.error || 'Something went wrong. Try again.') };
+      await showSignedIn(); setBusy(false);
     };
     $('keep').focus();
   }
@@ -320,12 +352,20 @@
   /* ── session ── */
   function handleSessionErr(msg) { spmAuth.clear(); S.token = null; S.me = null; showSignedOut(msg || 'Your session expired. Sign in again.'); }
   $('logout').onclick = () => { spmAuth.logout(S.token); S.firstName = ''; showSignedOut(); };
+  /* Sign-in check done HERE, not via spmAuth.boot: boot() clears the shared session on ANY failed check, so one dead
+     spot in a bar signed a player out of every SPM app (nemesis player lens). Storage still goes only through
+     spmAuth.get / set / clear (the SSO contract); the session is cleared only on a real sign-in error. */
   function boot() {
     app.innerHTML = '<div class="center"><span class="spin"></span><p class="sub" style="margin-top:12px">Loading the qualifiers…</p></div>';
-    spmAuth.boot({ app: 'multipass' }).then(r => {
-      if (!r.signedIn) return showSignedOut(r.error || '');
-      S.token = r.token; S.firstName = r.first_name || '';
-      showSignedIn();
+    let urlToken = null;
+    try { urlToken = new URLSearchParams(location.search).get('token'); if (urlToken) history.replaceState(null, '', location.pathname + (location.hash || '')); } catch (e) {}
+    const tok = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(urlToken || '') ? urlToken : spmAuth.get();
+    if (!tok) return showSignedOut(urlToken ? 'That link did not work. Request a fresh one.' : '');
+    gas('auth_verify', { token: tok }).then(r => {
+      if (r.ok) { spmAuth.set(tok); S.token = tok; S.firstName = r.first_name || ''; return showSignedIn(); }
+      if (spmAuth.isAuthErr(r.error)) { if (spmAuth.get() === tok) spmAuth.clear(); return showSignedOut(r.error); }
+      if (urlToken) return showSignedOut(r.error || 'That link did not work. Request a fresh one.');
+      showOffline(boot);   /* network or server hiccup: keep the session, offer a retry */
     });
   }
 
