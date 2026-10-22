@@ -333,12 +333,13 @@
 /* ── Live data refresh (apa_core.app_pulse) ─────────────────────────────────────────────────────────
    House rule: an open page whose data changes must poll and re-render, with version updates separate.
    Signed in: one hash over the public schedule PLUS this member's registrations, eligibility and qualified
-   marks (the operator marking "paid" or "eligible" shows up here). Signed out: the schedule only ('index').
-   Skips while a modal is open, a request is in flight, the sign-in box has focus, or the tab is hidden;
-   the first sample only seeds. */
+   marks (the operator marking "paid" or "eligible" shows up here). The key is the SESSION TOKEN, never the member
+   number: app_pulse resolves it server-side, so nobody can watch another member's state by guessing a number.
+   Signed out: the schedule only ('index'). Skips while a modal is open, a request is in flight, the sign-in box has
+   focus, or the tab is hidden; the first sample only seeds. */
   let _dataPulse = null;
   async function fetchDataPulse() {
-    const key = S.me ? S.me.member_number : 'index';
+    const key = S.token && S.me ? S.token : 'index';
     try {
       const r = await fetch(SB_URL + '/rest/v1/rpc/app_pulse', { method: 'POST',
         headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', 'Accept-Profile': 'apa_core', 'Content-Profile': 'apa_core' },
