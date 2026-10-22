@@ -124,7 +124,7 @@
   /* GAS: text/plain body, never application/json (CORS preflight GAS cannot answer) */
   const gas = (action, extra) => fetch(GAS_URL, { method: 'POST', body: JSON.stringify(Object.assign({ action }, extra || {})) })
     .then(r => r.json()).catch(() => ({ ok: false, error: 'Network hiccup. Check your connection and try again.' }));
-  const S = { token: null, firstName: '', me: null, events: [], maintenance: false, busy: false, flash: null };
+  const S = { token: null, firstName: '', me: null, events: [], maintenance: false, busy: false, loading: false, flash: null };
   const app = $('app');
   $('verLabel').textContent = window.APP_VERSION + (IS_PREPROD ? ' preprod' : '');
   if (IS_PREPROD) {
@@ -252,7 +252,8 @@
     $('ctl').hidden = false; $('whoami').textContent = S.firstName ? 'Signed in as ' + S.firstName : 'Signed in';
     if (!S.me) app.innerHTML = '<div class="center"><span class="spin"></span><p class="sub" style="margin-top:12px">Loading your qualifiers…</p></div>';
     const seed = S.token ? fetchDataPulse(S.token) : null;   /* sampled BEFORE the data: a change landing in between re-renders once, never vanishes */
-    const res = await loadSignedIn();
+    S.loading = true;
+    const res = await loadSignedIn().finally(() => { S.loading = false; });
     if (seed) seed.then(p => { if (p !== null) _dataPulse = p; });
     if (!res) return;   /* session ended → handled */
     if (res.error) { app.innerHTML = '<div class="empty">' + esc(res.error) + '<br><button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>'; $('retry').onclick = showSignedIn; return; }
@@ -357,12 +358,14 @@
     } catch (e) { return null; }
   }
   async function pollDataPulse() {
-    if (document.hidden || S.busy || document.querySelector('.note-back')) return;
+    /* never while the player's own action or a load is in flight: the poll would see "changed", re-render, and wipe the
+       confirmation of what they just did (caught by ui-multipass phone320:cancelled, 2026-10-22) */
+    if (document.hidden || S.busy || S.loading || document.querySelector('.note-back')) return;
     if ($('ident') && (document.activeElement === $('ident') || $('ident').value)) return;   /* do not wipe a half-typed sign-in */
     const p = await fetchDataPulse();
     if (p === null) return;
     if (_dataPulse === null) { _dataPulse = p; return; }
-    if (p !== _dataPulse) { _dataPulse = p; if (S.token) { S.flash = null; showSignedIn(); } else showSignedOut(); }
+    if (p !== _dataPulse) { _dataPulse = p; if (S.token) showSignedIn(); else showSignedOut(); }   /* the last confirmation stays */
   }
   setInterval(pollDataPulse, 20000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) pollDataPulse(); });
