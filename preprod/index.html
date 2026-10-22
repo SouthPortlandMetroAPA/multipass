@@ -361,14 +361,15 @@
   async function pollDataPulse() {
     /* never while the player's own action or a load is in flight: the poll would see "changed", re-render, and wipe the
        confirmation of what they just did (caught by ui-multipass phone320:cancelled, 2026-10-22) */
-    if (document.hidden || S.busy || S.loading || document.querySelector('.note-back')) return;
+    if (document.hidden) return;
+    if (S.busy || S.loading || document.querySelector('.note-back')) return;
     if ($('ident') && (document.activeElement === $('ident') || $('ident').value)) return;   /* do not wipe a half-typed sign-in */
     const p = await fetchDataPulse();
     if (p === null) return;
     if (_dataPulse === null) { _dataPulse = p; return; }
     if (p !== _dataPulse) { _dataPulse = p; if (S.token) showSignedIn(); else showSignedOut(); }   /* the last confirmation stays */
   }
-  setInterval(pollDataPulse, 20000);
+  setInterval(pollDataPulse, 30000);   /* the house interval (validate-app-pulse); a change shows within one poll + the fetch */
   document.addEventListener('visibilitychange', function () { if (!document.hidden) pollDataPulse(); });
   spmAuth.onChange(function (t) { if ((t || '') !== (S.token || '')) location.reload(); });   /* SSO: another app signed in or out */
   boot();
