@@ -276,6 +276,7 @@
     if (S.busy) return;                       /* a double tap sends one request; the server's UNIQUE is the real guard */
     const e = S.events.find(x => x.id === id); if (!e) return;
     setBusy(true); S.flash = null;
+    const btn = app.querySelector('[data-reg="' + id + '"]'); if (btn) btn.textContent = 'Signing you up…';   /* the mailer can take 30 s */
     const r = await gas('mp_register', { token: S.token, event_id: id });
     if (!r.ok && spmAuth.isAuthErr(r.error)) { setBusy(false); return handleSessionErr(r.error); }
     S.flash = r.ok ? { ok: true, text: 'You are signed up for ' + longDay(e.starts_at) + ' (' + fmtLabel(e.format) + '). We emailed you a confirmation with a calendar invite.' }
@@ -295,7 +296,7 @@
     back.addEventListener('click', ev => { if (ev.target === back) close(); });
     document.addEventListener('keydown', function k(ev) { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', k); } });
     $('yesCancel').onclick = async () => {
-      $('yesCancel').disabled = true; $('keep').disabled = true;
+      $('yesCancel').disabled = true; $('keep').disabled = true; $('yesCancel').textContent = 'Cancelling…';
       setBusy(true); S.flash = null;
       const r = await gas('mp_cancel', { token: S.token, event_id: id });
       close(); setBusy(false);
