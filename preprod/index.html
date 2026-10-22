@@ -44,6 +44,7 @@
   .btn:disabled{ background:#c9ccd6; cursor:not-allowed; }
   .btn.ghost{ background:#fff; color:var(--text); border:2px solid var(--border); }
   .btn.small{ width:auto; min-height:48px; font-size:.98rem; padding:8px 20px; margin-top:0; }
+  a.btn{ display:inline-flex; align-items:center; justify-content:center; text-decoration:none; box-sizing:border-box; }
   .err{ color:var(--spm-primary); font-size:.92rem; min-height:1.2em; margin:8px 0 0; }
   .ok-msg{ color:#0a7d33; font-weight:700; font-size:.95rem; margin:8px 0 0; }
   .fine{ color:var(--muted); font-size:.82rem; text-align:center; margin:12px 0 0; }
@@ -158,8 +159,10 @@
   }
   function cardHtml(e, signedIn) {
     const nine = e.format === '9';
-    const where = e.venue_name ? '<a href="' + mapUrl(e) + '" target="_blank" rel="noopener">' + esc(e.venue_name) + '</a>'
+    /* venue as plain text + a full-size Directions button: an inline link is a sub-48 px tap target on a phone */
+    const where = e.venue_name ? '<b>' + esc(e.venue_name) + '</b>'
       + (e.venue_address ? '<br><span class="ev-muted">' + esc(e.venue_address) + '</span>' : '') : '<span class="ev-muted">Venue to be announced</span>';
+    const dirs = e.venue_name ? '<a class="btn ghost small" href="' + mapUrl(e) + '" target="_blank" rel="noopener">Directions</a>' : '';
     const cost = money(Number(e.entry_fee) + Number(e.greens_fee));
     let html = '<div class="ev' + (e.my_status === 'registered' ? ' mine' : '') + '" data-ev="' + e.id + '">'
       + '<div class="ev-top"><div class="ev-date">' + esc(dayText(e.starts_at)) + '</div><div><span class="pill' + (nine ? ' nine' : '') + '">' + fmtLabel(e.format) + '</span>'
@@ -167,15 +170,15 @@
       + '<p class="ev-line">Doors open ' + esc(timeText(e.starts_at)) + (e.last_board_at ? '. Last new boards start at ' + esc(timeText(e.last_board_at)) : '') + '.</p>'
       + '<p class="ev-line">' + where + '</p>'
       + '<p class="ev-line">' + cost + ' for the day <span class="ev-muted">(' + money(e.entry_fee) + ' entry plus ' + money(e.greens_fee) + ' greens fee), pay at the door</span></p>';
-    if (!signedIn) return html + '</div>';
+    if (!signedIn) return html + (dirs ? '<div class="ev-actions">' + dirs + '</div>' : '') + '</div>';
     if (e.my_status === 'registered') {
       html += '<p class="ev-state in">You are registered. ' + (e.paid ? 'Paid.' : 'Pay at the door.') + '</p>'
         + (e.qualified ? '<div class="ev-why">You already qualified in ' + fmtLabel(e.format) + ', so you do not need this one. Cancel it to free up the spot.</div>' : '')
-        + '<div class="ev-actions"><button type="button" class="btn ghost small" data-cancel="' + e.id + '">Cancel my spot</button></div>';
+        + '<div class="ev-actions"><button type="button" class="btn ghost small" data-cancel="' + e.id + '">Cancel my spot</button>' + dirs + '</div>';
     } else if (e.can_register) {
-      html += '<div class="ev-actions"><button type="button" class="btn small" data-reg="' + e.id + '">Sign me up</button></div>';
-    } else if (e.why_text) {
-      html += '<div class="ev-why">' + esc(e.why_text) + '</div>';
+      html += '<div class="ev-actions"><button type="button" class="btn small" data-reg="' + e.id + '">Sign me up</button>' + dirs + '</div>';
+    } else {
+      html += (e.why_text ? '<div class="ev-why">' + esc(e.why_text) + '</div>' : '') + (dirs ? '<div class="ev-actions">' + dirs + '</div>' : '');
     }
     return html + '</div>';
   }
