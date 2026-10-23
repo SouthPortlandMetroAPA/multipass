@@ -135,7 +135,7 @@
   /* The league office, reachable from every "contact the office" line (nemesis player lens: a dead end otherwise). */
   const OFFICE_TEXT = 'https://bit.ly/spmtextus', OFFICE_EMAIL = 'soldans@southportlandmetroapa.com';
   const CAL_URL = 'https://southportlandmetroapa.github.io/calendarviewer/';
-  const S = { token: null, firstName: '', me: null, events: [], maintenance: false, busy: false, loading: false, flash: null };
+  const S = { token: null, firstName: '', me: null, events: [], maintenance: false, busy: false, loading: false, offline: false, flash: null };
   const app = $('app');
   $('verLabel').textContent = window.APP_VERSION + (IS_PREPROD ? ' preprod' : '');
   if (IS_PREPROD) {
@@ -177,6 +177,7 @@
       + '<a class="btn ghost small" href="' + CAL_URL + '" target="_blank" rel="noopener">League calendar</a></div></div>';
   }
   function showOffline(retry) {
+    S.offline = true;   /* the live poll stands down: there is no fresh view to compare against */
     app.innerHTML = '<div class="empty">We could not reach the league server. Check your signal, then try again. You are still signed in.'
       + '<br><button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>' + contactHtml();
     $('retry').onclick = retry;
@@ -217,12 +218,12 @@
     } catch (e) { return null; }
   }
   async function showSignedOut(msg) {
-    S.token = null; S.me = null; renderRail();
+    S.token = null; S.me = null; S.offline = false; renderRail();
     $('ctl').hidden = true;
     app.innerHTML = '<div class="center"><span class="spin"></span></div>';
     const seed = fetchDataPulse('index');                     /* sampled BEFORE the data (see showSignedIn) */
     const evs = await loadPublic();
-    seed.then(p => { if (p !== null && !S.token) _dataPulse = p; });
+    seed.then(p => { if (p !== null && !S.token) { _dataPulse = p; _dataPulseKey = 'index'; } });
     if (S.token) return;   /* signed in while we were loading */
     const list = evs === null ? '<div class="empty">We could not load the schedule. <button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>'
       : evs.length ? evs.map(e => cardHtml(e, false)).join('')
@@ -252,10 +253,13 @@
   /* ── signed in ── */
   function formatStatus(evs) {
     const out = [];
-    ['8', '9'].forEach(f => {
-      const mine = evs.filter(e => e.format === f);
+    const groups = [];
+    ['8', '9'].forEach(f => { [...new Set(evs.filter(e => e.format === f).map(e => e.regionals_season))].forEach(season => groups.push([f, season])); });
+    groups.forEach(([f, season]) => {
+      const mine = evs.filter(e => e.format === f && e.regionals_season === season);
       if (!mine.length) return;
-      const L = fmtLabel(f);
+      const many = groups.filter(g => g[0] === f).length > 1;
+      const L = fmtLabel(f) + (many ? ' for ' + season + ' Regionals' : '');
       if (mine.some(e => e.qualified)) { out.push('<div class="fmt-status good"><b>' + L + ': you qualified for Regionals.</b> Congratulations. No need to play another ' + L + ' qualifier.</div>'); return; }
       /* rostered comes from the server per event; a pause or a cutoff no longer masks "not on a team" */
       if (!mine.some(e => e.rostered)) { out.push('<div class="fmt-status stop"><b>' + L + ': we do not see you on a ' + L + ' team this session.</b> You need one to sign up online. If that is wrong, contact the league office (buttons below) and we will add you.</div>'); return; }
@@ -280,13 +284,14 @@
     const seed = S.token ? fetchDataPulse(S.token) : null;   /* sampled BEFORE the data: a change landing in between re-renders once, never vanishes */
     S.loading = true;
     const res = await loadSignedIn().finally(() => { S.loading = false; });
-    if (seed) seed.then(p => { if (p !== null) _dataPulse = p; });
+    if (seed) { const k = S.token; seed.then(p => { if (p !== null) { _dataPulse = p; _dataPulseKey = k; } }); }
     if (!res) return;   /* session ended → handled */
     if (res.offline) return showOffline(showSignedIn);
     if (res.error) { app.innerHTML = '<div class="empty">' + esc(res.error) + '<br><button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>' + contactHtml(); $('retry').onclick = showSignedIn; return; }
     render();
   }
   function render() {
+    S.offline = false;
     const evs = S.events;
     /* a confirmation is about the moment it happened: it expires, so it never sits above a card that changed since */
     const fresh = S.flash && Date.now() - S.flash.at < 20000;
@@ -364,8 +369,10 @@
     gas('auth_verify', { token: tok }).then(r => {
       if (r.ok) { spmAuth.set(tok); S.token = tok; S.firstName = r.first_name || ''; return showSignedIn(); }
       if (spmAuth.isAuthErr(r.error)) { if (spmAuth.get() === tok) spmAuth.clear(); return showSignedOut(r.error); }
-      if (urlToken) return showSignedOut(r.error || 'That link did not work. Request a fresh one.');
-      showOffline(boot);   /* network or server hiccup: keep the session, offer a retry */
+      /* network or server hiccup: keep the session — and a just-tapped link, which the address bar no longer holds —
+         so Try again re-checks it instead of forcing a fresh email (nemesis developer 2026-10-23) */
+      if (urlToken) spmAuth.set(tok);
+      showOffline(boot);
     });
   }
 
@@ -388,9 +395,12 @@
    focus, or the tab is hidden. The baseline is sampled when each view LOADS (before its data), not on the first
    poll: seeding on the first poll baked any change made in the first 20 s into the baseline and it never showed
    (caught by ui-multipass desktop:live, 2026-10-22). */
-  var _dataPulse = null;
+  var _dataPulse = null, _dataPulseKey = null;   /* a baseline is only a baseline for the key it was taken with */
+  const pulseKey = () => S.token && S.me ? S.token : 'index';
+  const pollOk = () => !S.busy && !S.loading && !S.offline && !document.querySelector('.note-back')
+    && !($('ident') && (document.activeElement === $('ident') || $('ident').value));   /* never wipe a half-typed sign-in */
   async function fetchDataPulse(forKey) {
-    const key = forKey || (S.token && S.me ? S.token : 'index');
+    const key = forKey || pulseKey();
     try {
       const r = await fetch(SB_URL + '/rest/v1/rpc/app_pulse', { method: 'POST',
         headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', 'Accept-Profile': 'apa_core', 'Content-Profile': 'apa_core' },
@@ -402,10 +412,12 @@
     /* never while the player's own action or a load is in flight: the poll would see "changed", re-render, and wipe the
        confirmation of what they just did (caught by ui-multipass phone320:cancelled, 2026-10-22) */
     if (document.hidden) return;
-    if (S.busy || S.loading || document.querySelector('.note-back')) return;
-    if ($('ident') && (document.activeElement === $('ident') || $('ident').value)) return;   /* do not wipe a half-typed sign-in */
-    const p = await fetchDataPulse();
+    if (!pollOk()) return;
+    const key = pulseKey();
+    const p = await fetchDataPulse(key);
     if (p === null) return;
+    if (!pollOk() || key !== pulseKey()) return;    /* re-checked AFTER the wait: a tap, a sign-in or a load may have started */
+    if (key !== _dataPulseKey) { _dataPulse = null; _dataPulseKey = key; }
     if (_dataPulse === null) { _dataPulse = p; return; }
     if (p !== _dataPulse) { _dataPulse = p; if (S.token) showSignedIn(); else showSignedOut(); }   /* the last confirmation stays */
   }
