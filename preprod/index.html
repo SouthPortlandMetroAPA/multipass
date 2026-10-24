@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  MultiPass — South Portland Metro APA · singles-qualifier sign-up (v1.2, rebuilt 2026-10-22, legacy look 2026-10-23)
+  MultiPass — South Portland Metro APA · singles-qualifier sign-up (v1.3, rebuilt 2026-10-22, legacy look 2026-10-23)
   ─────────────────────────────────────────────────────────────────────────────
   Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md (Spiral, High). Guards: tools/claude/validate-multipass.mjs
         (static pins + formatStatus unit tests) + tools/claude/appcheck/ui-multipass.mjs (headless, 4 viewports).
@@ -125,7 +125,7 @@
   .welcome{ text-align:center; }
   .welcome-pill{ margin:calc(14px*var(--k)) auto calc(4px*var(--k)); padding:calc(8px*var(--k)) calc(20px*var(--k)); border-radius:999px; font-size:1.35rem; font-weight:700;
     background:var(--grad); color:#fff; letter-spacing:.03em; text-align:center; width:fit-content; max-width:100%; }
-  .link-btn{ display:inline-flex; align-items:center; min-height:40px; margin:0 auto calc(10px*var(--k)); padding:0 12px; background:none; border:none; color:var(--spm-accent);
+  .link-btn{ display:inline-flex; align-items:center; min-height:44px; margin:0 auto calc(10px*var(--k)); padding:0 12px; background:none; border:none; color:var(--spm-accent);
     font:inherit; font-size:1rem; font-weight:700; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
   .ineligible-banner, .status-banner{ border-radius:calc(22px*var(--k)); padding:calc(18px*var(--k)) calc(20px*var(--k)); margin-bottom:calc(18px*var(--k)); font-size:1.1rem; line-height:1.5; text-align:center; }
   .ineligible-banner{ background:var(--warning-bg); border:1px solid var(--warning-border); color:var(--warning-text); }
@@ -303,8 +303,8 @@
   html.dev-d .beta-pill{ margin-top:8px; }
   html.dev-d .header-status{ display:none; }
   html.dev-d .login-bar{ max-width:500px; padding:6px 10px; gap:8px; margin-bottom:10px; }
-  html.dev-d .login-input{ font-size:14px; padding:8px 14px; min-height:40px; }
-  html.dev-d .login-btn{ font-size:13px; padding:8px 16px; letter-spacing:.06em; min-height:40px; }
+  html.dev-d .login-input{ font-size:14px; padding:8px 14px; min-height:42px; }
+  html.dev-d .login-btn{ font-size:13px; padding:8px 16px; letter-spacing:.06em; min-height:42px; }
   html.dev-d .login-hint{ font-size:12px; margin-top:-4px; }
   html.dev-d .welcome-pill{ font-size:28px; padding:6px 24px; margin:10px auto 2px; }
   html.dev-d .link-btn{ font-size:13px; }
@@ -315,10 +315,10 @@
   html.dev-d .not-found-card{ font-size:13px; border-radius:8px; padding:14px; max-width:420px; margin:0 auto 10px; }
   html.dev-d .info-card{ font-size:13px; border-radius:8px; padding:4px 14px; margin-top:12px; }
   html.dev-d .info-card summary{ padding:11px 0; }
-  html.dev-d .contact-btn{ font-size:12px; border-radius:6px; max-width:200px; margin:0 auto; display:flex; padding:8px; min-height:40px; }
+  html.dev-d .contact-btn{ font-size:12px; border-radius:6px; max-width:200px; margin:0 auto; display:flex; padding:8px; min-height:42px; }
   html.dev-d .contact-banner{ font-size:18px; padding:14px 10px; border-radius:10px; max-width:400px; margin:0 auto; }
   html.dev-d .modal-panel{ border-radius:12px; padding:18px 20px 16px; max-width:380px; }
-  html.dev-d .modal-title{ font-size:15px; } html.dev-d .modal-message{ font-size:13px; margin-bottom:14px; } html.dev-d .modal-btn{ font-size:13px; padding:8px 0; min-height:40px; }
+  html.dev-d .modal-title{ font-size:15px; } html.dev-d .modal-message{ font-size:13px; margin-bottom:14px; } html.dev-d .modal-btn{ font-size:13px; padding:8px 0; min-height:42px; }
   html.dev-d footer{ font-size:11px; margin-top:12px; }
   html.dev-d #cards.grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   html.dev-d .grid-col-header{ font-size:15px; font-weight:800; color:#555; text-align:center; text-transform:uppercase; letter-spacing:.12em; padding:0 0 4px; }
@@ -332,7 +332,7 @@
   html.dev-d .qual-card .badges{ grid-column:1; grid-row:1 / span 7; display:flex; flex-direction:column; align-items:center; gap:4px; margin:0; }
   html.dev-d .format-badge{ font-size:14px; padding:5px 12px; }
   html.dev-d .format-badge.test-badge{ margin-left:0; }
-  html.dev-d .qual-card > .register-btn{ grid-column:3; grid-row:1 / span 7; align-self:center; justify-self:center; font-size:15px; padding:7px 14px; margin:0; min-height:40px; }
+  html.dev-d .qual-card > .register-btn{ grid-column:3; grid-row:1 / span 7; align-self:center; justify-self:center; font-size:15px; padding:7px 14px; margin:0; min-height:42px; }
   html.dev-d .qual-card > .qual-date, html.dev-d .qual-card > .qual-location, html.dev-d .qual-card > .qual-time, html.dev-d .qual-card > .qual-fee,
   html.dev-d .qual-card > .elig-badge, html.dev-d .qual-card > .card-note, html.dev-d .qual-card > .card-after{ grid-column:2; }
   html.dev-d .qual-date{ font-size:19px; margin-bottom:1px; order:0; }
