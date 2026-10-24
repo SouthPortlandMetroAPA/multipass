@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  MultiPass — South Portland Metro APA · singles-qualifier sign-up (v1.3, rebuilt 2026-10-22, legacy look 2026-10-23)
+  MultiPass — South Portland Metro APA · singles-qualifier sign-up (v1.4, rebuilt 2026-10-22, legacy look 2026-10-23)
   ─────────────────────────────────────────────────────────────────────────────
   Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md (Spiral, High). Guards: tools/claude/validate-multipass.mjs
         (static pins + formatStatus unit tests) + tools/claude/appcheck/ui-multipass.mjs (headless, 4 viewports).
@@ -113,7 +113,8 @@
   .login-btn{ flex-shrink:0; min-height:44px; padding:calc(12px*var(--k)) calc(24px*var(--k)); border:none; border-bottom:calc(3px*var(--k)) solid rgba(0,0,0,.25); border-radius:999px;
     background:var(--gloss),var(--grad); color:#fff; font-weight:900; font-size:1.15rem; letter-spacing:.08em; font-family:inherit; cursor:pointer; white-space:nowrap;
     box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 4px 10px rgba(0,0,0,.30); text-shadow:0 1px 2px rgba(0,0,0,.25); transition:box-shadow .15s, transform .15s; }
-  .login-btn:disabled{ opacity:.5; }
+  .login-btn:disabled{ opacity:1; background:#4b5563; }   /* "SENDING…" stays readable (a 0.5 fade measured ~2.6:1) */
+  .login-input::placeholder{ color:#666; }               /* the only label the field shows: 5.25:1 on #f5f5f5 */
   .login-btn:active:not(:disabled){ transform:translateY(2px); border-bottom-width:1px; box-shadow:inset 0 1px 1px rgba(255,255,255,.15),0 1px 4px rgba(0,0,0,.25); }
   .login-hint{ text-align:center; color:var(--muted); font-size:.95rem; margin:calc(-8px*var(--k)) 0 calc(14px*var(--k)); }
   .hp{ position:absolute; left:-9999px; width:1px; height:1px; opacity:0; }
@@ -196,6 +197,8 @@
   .register-btn.btn-cancel{ background:var(--gloss),var(--spm-primary); box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 4px 10px rgba(234,0,42,.35); }
   .register-btn.btn-cancel-9{ background:var(--gloss),var(--spm-accent); box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 4px 10px rgba(0,49,161,.35); }
   .register-btn.btn-closed{ background:#999; border-bottom:none; box-shadow:none; text-shadow:none; cursor:not-allowed; }
+  /* "Closed" is the card's only status word: greyed, but readable (the 0.5 fade measured 1.77:1) */
+  .register-btn.btn-closed:disabled{ opacity:1; background:#d6d6d6; color:#3d3d3d; }
   .register-btn.btn-closed-cancel{ background:linear-gradient(180deg,rgba(255,255,255,.18) 0%,rgba(0,0,0,.08) 100%),#5c5c5c; border-bottom:2px solid rgba(0,0,0,.2);
     box-shadow:inset 0 1px 1px rgba(255,255,255,.2),0 2px 6px rgba(0,0,0,.2); line-height:1.4; }
   .register-btn.btn-signin-required{ background:#5f5f5f; border-bottom:2px solid rgba(0,0,0,.15); box-shadow:none; text-shadow:none; font-size:1.1rem; }
@@ -417,6 +420,7 @@
   };
   /* The league's contact page: the legacy "Questions? Hit Us Up" target, reachable from every dead end. */
   const CONTACT_URL = 'https://linktr.ee/spmContactUs';
+  const CAL_URL = 'https://southportlandmetroapa.github.io/calendarviewer/';
   const S = { token: null, firstName: '', name: '', me: null, events: [], pub: null, maintenance: false, busy: false, loading: false, offline: false,
               regOpen: true, painted: false, dirty: false };
   const app = $('app');
@@ -506,7 +510,9 @@
     else if (e.can_register) btn = '<button type="button" class="register-btn" data-reg="' + e.id + '">Register</button>';
     else btn = '<button type="button" class="register-btn" disabled>Register</button>';
     if (blocked && e.why_text) note = '<div class="card-note">' + esc(e.why_text) + '</div>';
-    if (reg && e.qualified) note = '<div class="card-note">You already qualified in ' + fmtLabel(e.format) + ', so you do not need this one. Cancel it to free up the spot.</div>';
+    /* only BEFORE the day: once it has started this may be the very event they won (the server's qualified mark is per format
+       and season, not per event), and cancelling is closed anyway (nemesis player lens, round 2) */
+    if (reg && e.qualified && !started) note = '<div class="card-note">You already qualified in ' + fmtLabel(e.format) + ', so you do not need this one. Cancel it to free up the spot.</div>';
     if (closed && !reg) after = '<div class="card-after">Online registration has closed. Walk-ins are welcome.</div>';
     return '<div class="' + cls + '" data-ev="' + e.id + '">'
       + '<div class="qual-date">' + esc(inCol ? monthDay(e.starts_at) : longDay(e.starts_at)) + '</div>'
@@ -542,7 +548,9 @@
   }
   /* The schedule block, legacy order: divider, contact banner, 10-scores note, the cards. */
   function scheduleHtml(evs, signedIn) {
-    const list = !evs.length ? '<div id="cards"><div class="msg msg-info">No qualifier events are currently scheduled.</div></div>'
+    /* "none open online" is not "none scheduled": qualifiers can be on the league calendar before sign-ups open here */
+    const list = !evs.length ? '<div id="cards"><div class="msg msg-info">No qualifiers are open for online sign-up right now. Walk-ins are welcome at every qualifier; the league calendar has the dates.</div>'
+      + '<a class="contact-btn" href="' + CAL_URL + '" target="_blank" rel="noopener">League Calendar</a><div style="height:14px"></div></div>'
       : isDesk() ? gridHtml(evs, signedIn) : '<div id="cards">' + evs.map(e => cardHtml(e, signedIn, false)).join('') + '</div>';
     const out = '<div class="section-divider"><span>Available Qualifiers</span></div>' + contactHtml()
       + '<div class="eligibility-note">&#9888;&#65039; You must have at least 10 scores in the format within the last 2 years to qualify.</div>'
@@ -718,8 +726,9 @@
   function setBusy(on) { S.busy = on; app.querySelectorAll('button[data-reg],button[data-cancel]').forEach(b => b.disabled = on); }
 
   /* ── modals (legacy: "You're Registered!", "Cancel Registration", "Registration Failed") ── */
+  let _modalOpener = null;   /* focus goes back where it came from when a pop-up closes */
   function openModal(inner, focusId) {
-    const old = $('modal'); if (old) old.remove();
+    const old = $('modal'); if (old) old.remove(); else _modalOpener = document.activeElement;
     const back = document.createElement('div'); back.className = 'modal'; back.id = 'modal';
     back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true'); back.setAttribute('aria-labelledby', 'modalTitle');
     back.innerHTML = '<div class="modal-panel">' + inner + '</div>';
@@ -727,8 +736,20 @@
     back.addEventListener('click', ev => { if (ev.target === back) closeModal(); });
     if (focusId && $(focusId)) $(focusId).focus();
   }
-  function closeModal() { const m = $('modal'); if (m) m.remove(); if (S.dirty) repaint(); }
-  document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && $('modal')) closeModal(); });
+  function closeModal() {
+    const m = $('modal'); if (m) m.remove();
+    const o = _modalOpener; _modalOpener = null; if (o && document.contains(o) && o.focus) o.focus();
+    if (S.dirty) repaint();
+  }
+  document.addEventListener('keydown', ev => {
+    const m = $('modal'); if (!m) return;
+    if (ev.key === 'Escape') { closeModal(); return; }
+    if (ev.key === 'Tab') {   /* Tab stays inside the pop-up */
+      const f = [...m.querySelectorAll('button:not([disabled]), a[href], input:not([disabled])')]; if (!f.length) return;
+      if (ev.shiftKey && document.activeElement === f[0]) { ev.preventDefault(); f[f.length - 1].focus(); }
+      else if (!ev.shiftKey && document.activeElement === f[f.length - 1]) { ev.preventDefault(); f[0].focus(); }
+    }
+  });
   function infoModal(title, text, extra) {
     openModal('<div class="modal-title" id="modalTitle">' + esc(title) + '</div><div class="modal-message">' + esc(text) + (extra || '') + '</div>'
       + '<div class="modal-actions"><button type="button" class="modal-btn modal-btn-ok" id="infoOk">Got It</button></div>', 'infoOk');
