@@ -1,8 +1,21 @@
 <!DOCTYPE html>
 <!--
-  MultiPass — South Portland Metro APA · singles-qualifier sign-up (v1.0, rebuilt 2026-10-22)
+  MultiPass — South Portland Metro APA · singles-qualifier sign-up (v1.1, rebuilt 2026-10-22, legacy look 2026-10-23)
   ─────────────────────────────────────────────────────────────────────────────
-  Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md (Spiral, High). Guard: tools/claude/validate-multipass.mjs.
+  Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md (Spiral, High). Guards: tools/claude/validate-multipass.mjs
+        (static pins) + tools/claude/appcheck/ui-multipass.mjs (headless, 4 viewports).
+  LOOK  the LEGACY MultiPass layout, on the operator's call ("the multipass ui doesnt look like the old one... update this
+        one to match", 2026-10-23): gradient header with the italic MultiPass name + SINGLES QUALIFIER REGISTRATION pill,
+        compact pill sign-in bar, welcome pill, Your Registrations panel, AVAILABLE QUALIFIERS divider, "Questions? Hit Us
+        Up" banner, yellow 10-scores note, centred date-first cards (solid red 8-Ball / blue 9-Ball pills, 3D gradient
+        buttons, left-border tint by eligibility), desktop SATURDAY / SUNDAY grid. Source of truth for the look: the legacy
+        root index.html (git da556c1). Deliberate differences, each for a reason:
+          · the legacy page drew phones at 36 px and shrank the whole page with transform: scale(0.44) — that put its
+            modal 470 px down the page. Here the same sizes are drawn directly (--k = 0.44 below 768 px, 1 above).
+          · the sign-in bar emails a link (shared SSO), it does not look anyone up; it hides once you are signed in.
+          · tap targets are at least 40 px (house check), muted text is #767676 (legacy #888 fails contrast).
+          · fee line, eligibility per format, "how it works", and a contact route in every dead end (legacy had none).
+          · the weekend grid works out dates from the event itself (legacy hard-coded 2026).
   WHO   anyone can SEE the open qualifiers (anon read of multipass.events; RLS shows only enabled, non-test rows).
         A signed-in member (shared sign-in, spm-auth.js — one session across every SPM app) registers or cancels
         THEMSELF. Rostered players self-register; the league office confirms the "10 scores in 2 years" rule in
@@ -12,7 +25,8 @@
         session, never from this page, and re-checks every rule; this page only explains what it says.
         Direct Supabase reads: multipass.events (anon, public schedule), apa_core.apps (updater), apa_core.app_pulse.
   MAIL  confirmation + cancellation, each with a calendar invite (REQUEST / CANCEL), from the server.
-  Brand: spm-base.css. Auto-updater: apa_core.apps row "MultiPass" / "MultiPass-preprod" → version.js (serve-then-bump).
+  Brand: the palette is inlined (--spm-primary / --spm-accent, PatchCheck-style; validate-ui-brand accepts either).
+  Auto-updater: apa_core.apps row "MultiPass" / "MultiPass-preprod" → version.js (serve-then-bump).
   Preprod: same file; IS_PREPROD from the URL; asks the server for is_test fixture events (testers only).
   Copy rule: no em-dashes in anything a player reads.
   Replaces the legacy GAS + Sheets MultiPass (no sign-in, stale eligibility) at the same URL.
@@ -28,87 +42,331 @@
 <meta property="og:title" content="MultiPass · SPM APA singles qualifiers">
 <meta property="og:description" content="Sign up for South Portland Metro APA singles qualifiers. Win a board, go to Regionals.">
 <meta property="og:image" content="https://southportlandmetroapa.github.io/multipass/og-image.png">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8E%B1%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="https://southportlandmetroapa.github.io/shared/spm-base.css">
+<link rel="icon" type="image/svg+xml" href="https://southportlandmetroapa.github.io/multipass/favicon.svg">
 <script src="version.js"></script>
 <script src="https://southportlandmetroapa.github.io/shared/spm-auth.js"></script>
 <style>
+  :root{
+    --spm-primary:#ea002a; --spm-accent:#0031a1;
+    --bg:#f5f5f5; --card:#fff; --border:#e1e1e1; --text:#1f1f1f; --muted:#767676;
+    --registered-bg:#f0faf3; --registered-border:#28a745;
+    --warning-bg:#fff3cd; --warning-border:#ffc107; --warning-text:#856404;
+    --grad:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));
+    --gloss:linear-gradient(180deg,rgba(255,255,255,.22) 0%,rgba(0,0,0,.10) 100%);
+    /* the legacy phone page was drawn at 36 px and scaled by 0.44; --k carries that factor for its px values */
+    --k:.44;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
   [hidden]{ display:none !important; }
-  .spm-page{ max-width:640px; }
-  .lead{ color:var(--muted); margin:2px 0 16px; font-size:1rem; line-height:1.5; }
-  .lbl{ font-weight:800; font-size:1.02rem; margin:20px 0 8px; display:block; color:var(--text); }
-  .sub{ color:var(--muted); font-size:.88rem; margin:0 0 8px; }
-  input[type=text]{ width:100%; font:inherit; padding:12px 16px; border:2px solid var(--border); border-radius:12px; background:#fff; min-height:48px; color:var(--text); box-sizing:border-box; }
-  input:focus{ outline:none; border-color:var(--spm-accent); }
-  .btn{ width:100%; font:inherit; font-weight:800; font-size:1.05rem; border:none; border-radius:999px; padding:12px 20px; min-height:52px; cursor:pointer; background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent)); color:#fff; margin-top:12px; }
-  .btn:disabled{ background:#c9ccd6; cursor:not-allowed; }
-  .btn.ghost{ background:#fff; color:var(--text); border:2px solid var(--border); }
-  /* in-progress label stays readable: the plain disabled grey was 1.6:1 (nemesis ui lens) */
-  .btn.working:disabled{ background:#4b5563; color:#fff; border-color:#4b5563; }
-  .btn.small{ width:auto; min-height:48px; font-size:.98rem; padding:8px 20px; margin-top:0; }
-  a.btn{ display:inline-flex; align-items:center; justify-content:center; text-decoration:none; box-sizing:border-box; }
-  .err{ color:var(--spm-primary); font-size:.92rem; min-height:1.2em; margin:8px 0 0; }
-  .ok-msg{ color:#0a7d33; font-weight:700; font-size:.95rem; margin:8px 0 0; }
-  .fine{ color:var(--muted); font-size:.82rem; text-align:center; margin:12px 0 0; }
+  html{ font-size:16px; }
+  html, body{ background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .page{ padding:calc(16px*var(--k)); }
+
+  /* header */
+  header{ border-radius:calc(22px*var(--k)); padding:calc(22px*var(--k)) calc(20px*var(--k)) calc(20px*var(--k)); color:#fff; background:var(--grad);
+    box-shadow:0 calc(6px*var(--k)) calc(18px*var(--k)) rgba(0,0,0,.25); text-align:center; margin-bottom:calc(18px*var(--k)); }
+  .title{ font-size:calc(70px*var(--k)); font-weight:900; line-height:1.08; }
+  .subtitle-group{ display:inline-block; margin-top:calc(10px*var(--k)); }
+  .subtitle{ font-size:calc(79px*var(--k)); font-weight:400; font-style:italic; opacity:.95; }
+  .beta-pill{ display:block; width:100%; margin-top:calc(8px*var(--k)); padding:calc(10px*var(--k)) calc(20px*var(--k)); border-radius:999px; font-size:max(11px,calc(24px*var(--k)));
+    font-weight:800; letter-spacing:.06em; text-transform:uppercase; background:rgba(255,255,255,.25); color:#fff; border:2px solid rgba(255,255,255,.7); }
+  .header-status{ margin:calc(10px*var(--k)) 0 0; font-size:calc(54px*var(--k)); opacity:.9; }
+  .header-status:empty{ display:none; }
+
+  /* messages */
+  .msg{ width:100%; border-radius:calc(22px*var(--k)); padding:calc(18px*var(--k)) calc(20px*var(--k)); margin-bottom:calc(18px*var(--k)); font-size:1.15rem; line-height:1.4; }
+  .msg-error{ background:#f8d7da; color:#721c24; }
+  .msg-info{ background:#e8f0fe; color:#1a3b6b; }
+  .msg-success{ background:#d4edda; color:#155724; }
+
+  /* compact sign-in bar */
+  .login-bar{ display:flex; align-items:center; gap:calc(10px*var(--k)); max-width:700px; margin:0 auto calc(18px*var(--k)); padding:calc(10px*var(--k)) calc(14px*var(--k));
+    background:var(--card); border:1px solid var(--border); border-radius:999px; box-shadow:0 2px 6px rgba(0,0,0,.08); }
+  .login-input{ flex:1; min-width:0; min-height:44px; padding:calc(12px*var(--k)) calc(16px*var(--k)); font-size:1.15rem; border-radius:999px; border:1px solid var(--border);
+    background:var(--bg); color:var(--text); font-family:inherit; text-align:center; outline:none; transition:border-color .2s, box-shadow .2s; }
+  .login-input:focus{ border-color:var(--spm-accent); box-shadow:0 0 0 3px rgba(0,49,161,.15); }
+  .login-btn{ flex-shrink:0; min-height:44px; padding:calc(12px*var(--k)) calc(24px*var(--k)); border:none; border-bottom:calc(3px*var(--k)) solid rgba(0,0,0,.25); border-radius:999px;
+    background:var(--gloss),var(--grad); color:#fff; font-weight:900; font-size:1.15rem; letter-spacing:.08em; font-family:inherit; cursor:pointer; white-space:nowrap;
+    box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 4px 10px rgba(0,0,0,.30); text-shadow:0 1px 2px rgba(0,0,0,.25); transition:box-shadow .15s, transform .15s; }
+  .login-btn:disabled{ opacity:.5; }
+  .login-btn:active:not(:disabled){ transform:translateY(2px); border-bottom-width:1px; box-shadow:inset 0 1px 1px rgba(255,255,255,.15),0 1px 4px rgba(0,0,0,.25); }
+  .login-hint{ text-align:center; color:var(--muted); font-size:.95rem; margin:calc(-8px*var(--k)) 0 calc(14px*var(--k)); }
   .hp{ position:absolute; left:-9999px; width:1px; height:1px; opacity:0; }
-  .ctl{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0 0 12px; }
-  .ctl button{ background:none; border:none; color:var(--spm-accent); font:inherit; font-weight:700; cursor:pointer; min-height:48px; padding:8px 0; }
+
+  /* divider, welcome, banners */
+  .section-divider{ display:flex; align-items:center; margin:calc(24px*var(--k)) 0 calc(14px*var(--k)); color:var(--muted); font-size:.8rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+  .section-divider::before, .section-divider::after{ content:''; flex:1; height:1px; background:var(--border); }
+  .section-divider span{ padding:0 calc(14px*var(--k)); white-space:nowrap; }
+  .welcome{ text-align:center; }
+  .welcome-pill{ margin:calc(14px*var(--k)) auto calc(4px*var(--k)); padding:calc(8px*var(--k)) calc(20px*var(--k)); border-radius:999px; font-size:1.35rem; font-weight:700;
+    background:var(--grad); color:#fff; letter-spacing:.03em; text-align:center; width:fit-content; max-width:100%; }
+  .link-btn{ display:inline-flex; align-items:center; min-height:40px; margin:0 auto calc(10px*var(--k)); padding:0 12px; background:none; border:none; color:var(--spm-accent);
+    font:inherit; font-size:1rem; font-weight:700; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+  .ineligible-banner, .status-banner{ border-radius:calc(22px*var(--k)); padding:calc(18px*var(--k)) calc(20px*var(--k)); margin-bottom:calc(18px*var(--k)); font-size:1.1rem; line-height:1.5; text-align:center; }
+  .ineligible-banner{ background:var(--warning-bg); border:1px solid var(--warning-border); color:var(--warning-text); }
+  .status-banner.good{ background:#d4edda; border:1px solid #28a745; color:#155724; }
+  .status-banner.stop{ background:#f8d7da; border:1px solid #dc3545; color:#721c24; }
+  .ineligible-banner p{ margin-bottom:12px; } .ineligible-banner p:last-child{ margin-bottom:0; }
+  .error-content{ display:inline-block; text-align:left; }
+  .error-content ul{ margin:8px 0; padding-left:20px; line-height:1.6; }
+  .error-content li{ margin-bottom:6px; }
+  .not-found-card, .info-card{ background:var(--card); border-radius:calc(22px*var(--k)); padding:calc(22px*var(--k)) calc(20px*var(--k)); box-shadow:0 calc(3px*var(--k)) calc(10px*var(--k)) rgba(0,0,0,.12);
+    border:1px solid var(--border); margin-bottom:calc(18px*var(--k)); text-align:center; font-size:1.15rem; line-height:1.5; }
+  .not-found-card p, .info-card p{ margin-bottom:14px; }
+  .info-card{ text-align:left; font-size:1.05rem; }
+  .info-card ul{ padding-left:20px; } .info-card li{ margin-bottom:6px; }
+  .contact-btn{ display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:calc(14px*var(--k)) calc(10px*var(--k)); width:100%; font-size:1.05rem; font-weight:800; color:#fff; text-decoration:none;
+    border-radius:calc(22px*var(--k)); background:var(--grad); box-shadow:0 4px 14px rgba(0,0,0,.2); line-height:1.3; text-align:center; }
+  .contact-wrap{ text-align:center; margin-bottom:calc(14px*var(--k)); }
+  .contact-banner{ display:block; padding:calc(28px*var(--k)) calc(10px*var(--k)); width:100%; font-size:2.1rem; font-weight:800; color:#fff; text-decoration:none; border-radius:calc(22px*var(--k));
+    background:var(--grad); box-shadow:0 calc(6px*var(--k)) calc(18px*var(--k)) rgba(0,0,0,.25); line-height:1.3; text-align:center; }
+  .contact-banner:active, .contact-btn:active{ opacity:.85; }
+  .eligibility-note{ font-size:.92rem; font-weight:600; color:#856404; background:#fff3cd; border:1px solid #ffc107; border-radius:calc(14px*var(--k)); text-align:center;
+    padding:calc(12px*var(--k)) calc(16px*var(--k)); margin-bottom:calc(14px*var(--k)); line-height:1.4; }
+
+  /* qualifier cards */
+  .qual-card{ background:var(--card); border-radius:calc(22px*var(--k)); padding:calc(20px*var(--k)); box-shadow:0 calc(3px*var(--k)) calc(10px*var(--k)) rgba(0,0,0,.12);
+    border:1px solid var(--border); margin-bottom:calc(18px*var(--k)); text-align:center; transition:background .3s, border-color .3s, box-shadow .3s; }
+  .qual-card.anim{ animation:slideDown .3s ease-out; }
+  .qual-card.card-registered{ border-left:calc(6px*var(--k)) solid #ffc107; background:#fffbeb; }
+  .qual-card.card-registered.card-elig-confirmed{ border-left-color:var(--registered-border); background:var(--registered-bg); }
+  .qual-card.card-registered.card-elig-ineligible{ border-left-color:#dc3545; background:#fdf0f1; }
+  .qual-card.card-closed{ opacity:.65; }
+  .qual-card.card-closed.card-registered{ opacity:.82; }
+  .qual-card.card-disabled{ opacity:.7; }
+  .qual-card.flash{ box-shadow:0 0 0 4px rgba(0,49,161,.4); }
+  .qual-date{ font-size:1.5rem; font-weight:800; margin-bottom:calc(8px*var(--k)); }
+  .badges{ margin-bottom:calc(10px*var(--k)); }
+  .format-badge{ display:inline-block; font-size:1.15rem; font-weight:700; padding:calc(4px*var(--k)) calc(16px*var(--k)); border-radius:999px; color:#fff; }
+  .format-8{ background:var(--spm-primary); }
+  .format-9{ background:var(--spm-accent); }
+  .format-badge.test-badge{ background:#fff3cd; color:#7a5a00; margin-left:6px; }
+  .qual-time{ font-size:1.25rem; color:var(--muted); margin-bottom:calc(4px*var(--k)); }
+  .qual-location{ display:inline-flex; align-items:center; justify-content:center; min-height:40px; font-size:1.35rem; margin-bottom:calc(6px*var(--k)); font-weight:600;
+    color:var(--spm-accent); text-decoration:underline; text-decoration-color:rgba(0,49,161,.3); text-underline-offset:2px; }
+  .qual-location:visited{ color:var(--spm-accent); }
+  .qual-location.tba{ color:var(--muted); text-decoration:none; }
+  .qual-fee{ font-size:1.05rem; color:var(--muted); margin-bottom:calc(14px*var(--k)); }
+  .qual-fee.paid{ color:#155724; font-weight:700; }
+  .elig-badge{ display:block; width:90%; margin:0 auto calc(10px*var(--k)); font-size:.92rem; font-weight:700; padding:calc(8px*var(--k)) calc(14px*var(--k)); border-radius:calc(12px*var(--k));
+    letter-spacing:.04em; text-align:center; }
+  .elig-pending{ background:#fff3cd; color:#856404; border:1px solid #ffc107; }
+  .elig-eligible{ background:#d4edda; color:#155724; border:1px solid #28a745; }
+  .elig-ineligible{ background:#f8d7da; color:#721c24; border:1px solid #dc3545; }
+  .card-note{ width:90%; margin:0 auto calc(10px*var(--k)); font-size:.95rem; line-height:1.4; color:var(--warning-text); background:var(--warning-bg); border:1px solid var(--warning-border);
+    border-radius:calc(12px*var(--k)); padding:calc(8px*var(--k)) calc(14px*var(--k)); }
+  .card-after{ margin-top:calc(10px*var(--k)); font-size:.95rem; color:var(--muted); line-height:1.4; }
+
+  /* the 3D pill button */
+  .register-btn{ display:block; width:auto; margin:0 auto; min-height:48px; padding:calc(14px*var(--k)) calc(40px*var(--k)); font-size:1.35rem; font-weight:800; letter-spacing:.04em; color:#fff;
+    border:none; border-bottom:calc(3px*var(--k)) solid rgba(0,0,0,.25); border-radius:999px; background:var(--gloss),var(--grad);
+    box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 4px 10px rgba(0,0,0,.30); cursor:pointer; font-family:inherit; line-height:1.3;
+    text-shadow:0 1px 2px rgba(0,0,0,.25); transition:box-shadow .15s, transform .15s, background .3s; }
+  .register-btn:active:not(:disabled){ transform:translateY(2px); border-bottom-width:1px; box-shadow:inset 0 1px 1px rgba(255,255,255,.15),0 1px 4px rgba(0,0,0,.25); }
+  .register-btn:disabled{ opacity:.5; cursor:not-allowed; }
+  /* the button doing the work stays readable (a plain disabled fade was 1.6:1, nemesis ui lens) */
+  .register-btn.working:disabled, .modal-btn.working:disabled{ opacity:1; background:#4b5563; color:#fff; }
+  .register-btn.btn-cancel{ background:var(--gloss),var(--spm-primary); box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 4px 10px rgba(234,0,42,.35); }
+  .register-btn.btn-cancel-9{ background:var(--gloss),var(--spm-accent); box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 4px 10px rgba(0,49,161,.35); }
+  .register-btn.btn-closed{ background:#999; border-bottom:none; box-shadow:none; text-shadow:none; cursor:not-allowed; }
+  .register-btn.btn-closed-cancel{ background:linear-gradient(180deg,rgba(255,255,255,.18) 0%,rgba(0,0,0,.08) 100%),#777; border-bottom:2px solid rgba(0,0,0,.2);
+    box-shadow:inset 0 1px 1px rgba(255,255,255,.2),0 2px 6px rgba(0,0,0,.2); line-height:1.4; }
+  .register-btn.btn-signin-required{ background:#8a8a8a; border-bottom:2px solid rgba(0,0,0,.15); box-shadow:none; text-shadow:none; font-size:1.1rem; }
+
+  /* Your Registrations */
+  .reg-summary{ margin-bottom:calc(18px*var(--k)); border-radius:calc(22px*var(--k)); overflow:hidden; background:rgba(0,49,161,.04); border:1px solid rgba(0,49,161,.18);
+    box-shadow:0 2px 6px rgba(0,0,0,.06); }
+  .reg-summary-bar{ display:flex; align-items:center; width:100%; min-height:44px; padding:calc(12px*var(--k)) calc(16px*var(--k)); background:none; border:none; font:inherit; color:inherit;
+    text-align:left; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  .reg-summary-bar:active{ background:rgba(0,49,161,.08); }
+  .reg-summary-icon{ width:1.6rem; height:1.6rem; border-radius:50%; background:#d4edda; color:#28a745; display:flex; align-items:center; justify-content:center; font-size:.95rem;
+    font-weight:900; flex-shrink:0; margin-right:calc(10px*var(--k)); }
+  .reg-summary-title{ flex:1; font-size:1.5rem; font-weight:700; }
+  .reg-summary-count{ display:inline-flex; align-items:center; justify-content:center; min-width:1.5rem; height:1.5rem; padding:0 .4rem; border-radius:999px; background:var(--grad);
+    color:#fff; font-size:.95rem; font-weight:800; margin-right:calc(8px*var(--k)); }
+  .reg-summary-chevron{ font-size:.95rem; color:var(--muted); transition:transform .25s ease; flex-shrink:0; }
+  .reg-summary.expanded .reg-summary-chevron{ transform:rotate(180deg); }
+  .reg-summary-body{ max-height:0; overflow:hidden; visibility:hidden; transition:max-height .3s ease, visibility .3s; }
+  .reg-summary.expanded .reg-summary-body{ max-height:900px; visibility:visible; border-top:1px solid rgba(0,49,161,.12); }
+  .reg-summary-list{ padding:calc(8px*var(--k)) calc(14px*var(--k)) calc(12px*var(--k)); }
+  .reg-summary-item{ display:flex; align-items:center; gap:calc(10px*var(--k)); width:100%; min-height:44px; padding:calc(10px*var(--k)) calc(14px*var(--k)); margin-bottom:calc(6px*var(--k));
+    background:#fff; border-radius:calc(16px*var(--k)); border:1px solid rgba(0,0,0,.07); border-left:max(2px,calc(4px*var(--k))) solid var(--registered-border);
+    font:inherit; color:inherit; text-align:left; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  .reg-summary-item:last-child{ margin-bottom:0; }
+  .reg-summary-item:active{ background:#f0faf3; }
+  .reg-summary-format{ display:inline-block; font-size:1.15rem; font-weight:700; padding:calc(4px*var(--k)) calc(14px*var(--k)); border-radius:999px; color:#fff; flex-shrink:0; }
+  .reg-summary-details{ display:block; flex:1; min-width:0; }
+  .reg-summary-date{ display:block; font-size:1.35rem; font-weight:700; }
+  .reg-summary-location{ display:block; font-size:1.05rem; color:var(--muted); margin-top:2px; }
+
+  /* modal */
+  .modal{ position:fixed; inset:0; background:rgba(0,0,0,.58); z-index:1000; display:flex; justify-content:center; align-items:center; padding:16px; overflow-y:auto; }
+  @media (max-height:560px){ .modal{ align-items:flex-start; } }
+  .modal-panel{ background:#fff; border-radius:calc(22px*var(--k)); padding:calc(34px*var(--k)) calc(28px*var(--k)) calc(28px*var(--k)); width:100%; max-width:900px;
+    box-shadow:0 8px 40px rgba(0,0,0,.35); text-align:center; margin:auto; }
+  .modal-title{ font-size:1.35rem; font-weight:800; margin-bottom:calc(12px*var(--k)); }
+  .modal-message{ font-size:1.1rem; line-height:1.5; margin-bottom:calc(26px*var(--k)); color:#555; white-space:pre-line; }
+  .modal-actions{ display:flex; gap:calc(12px*var(--k)); }
+  .modal-btn{ flex:1; min-height:48px; padding:calc(16px*var(--k)) 0; font-size:1.15rem; font-weight:700; border:none; border-radius:999px; cursor:pointer; font-family:inherit; }
+  .modal-btn:active{ opacity:.82; }
+  .modal-btn-confirm{ background:var(--spm-primary); color:#fff; }
+  .modal-btn-dismiss{ background:var(--bg); color:var(--text); border:1px solid var(--border); }
+  .modal-btn-ok{ background:var(--grad); color:#fff; }
+  .elig-callout{ white-space:normal; border-radius:10px; padding:12px 14px; margin-top:14px; text-align:center; font-size:.95em; }
+  .elig-callout b{ display:block; }
+  .elig-callout.ok{ background:#d4edda; border:1px solid #28a745; color:#155724; }
+  .elig-callout.stop{ background:#f8d7da; border:1px solid #dc3545; color:#721c24; }
+  .elig-callout.warn{ background:#fff3cd; border:1px solid #ffc107; color:#856404; }
+
+  footer{ text-align:center; font-size:.9rem; color:var(--muted); margin:calc(30px*var(--k)) 0 0; line-height:1.4; }
+  .center{ padding:24px 8px; text-align:center; color:var(--muted); }
   .spin{ display:inline-block; width:28px; height:28px; border:3px solid #e5e7eb; border-top-color:var(--spm-primary); border-radius:50%; animation:spin 1s linear infinite; }
   @keyframes spin{ to{ transform:rotate(360deg); } }
-  .center{ padding:24px 8px; text-align:center; }
-  /* status strip per format */
-  .fmt-status{ border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin:0 0 12px; font-size:.95rem; line-height:1.45; }
-  .fmt-status b{ font-weight:800; }
-  .fmt-status.good{ background:#f0faf3; border-color:#bfe6cb; }
-  .fmt-status.warn{ background:#fff8e1; border-color:#f0e0a8; }
-  .fmt-status.stop{ background:#fdf0f1; border-color:#f3c3c9; }
-  /* event cards */
-  .ev{ border:1px solid var(--border); border-radius:12px; padding:16px; margin:0 0 12px; background:#fff; box-shadow:0 3px 10px rgba(0,0,0,.06); }
-  .ev.mine{ border-color:#7fb08e; box-shadow:0 0 0 2px #cfe9d7 inset; }
-  .ev-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
-  .ev-date{ font-weight:800; font-size:1.15rem; line-height:1.3; }
-  .pill{ display:inline-block; font-size:.78rem; font-weight:800; letter-spacing:.03em; padding:4px 12px; border-radius:999px; background:#e7edfb; color:#0031a1; white-space:nowrap; }
-  .pill.nine{ background:#fde8ec; color:#b0001f; }
-  .pill.test{ background:#fff3cd; color:#7a5a00; margin-left:4px; }
-  .ev-line{ margin:8px 0 0; font-size:.95rem; line-height:1.45; color:var(--text); }
-  .ev-line a{ color:var(--spm-accent); font-weight:600; }
-  .ev-muted{ color:var(--muted); }
-  .ev-state{ margin:12px 0 0; font-size:.95rem; font-weight:700; }
-  .ev-state.in{ color:#0a7d33; }
-  .ev-why{ margin:12px 0 0; font-size:.92rem; color:#7a5a00; background:#fff8e1; border:1px solid #f0e0a8; border-radius:8px; padding:8px 12px; line-height:1.45; }
-  .ev-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
-  .empty{ border:1px dashed var(--border); border-radius:12px; padding:24px 16px; text-align:center; color:var(--muted); }
-  .how{ border-top:1px solid var(--border); margin-top:20px; padding-top:12px; font-size:.92rem; line-height:1.5; color:var(--text); }
-  .how h2{ font-size:1rem; margin:0 0 8px; }
-  .how ul{ margin:0; padding-left:20px; }
-  .how li{ margin:0 0 4px; }
-  .banner{ border-radius:12px; padding:12px 16px; margin:0 0 12px; font-size:.95rem; background:#fff8e1; border:1px solid #f0e0a8; color:#5c4400; }
-  /* confirm modal (ShortRack / FairPlay note pattern) */
-  .note-back{ position:fixed; inset:0; background:rgba(20,30,50,.55); z-index:200; display:flex; align-items:center; justify-content:center; padding:16px; overflow-y:auto; }
-  @media (max-height:560px){ .note-back{ align-items:flex-start; } }
-  .note{ background:#fff; border-radius:16px; max-width:420px; width:100%; padding:20px; box-shadow:0 12px 40px rgba(0,0,0,.25); margin:auto; }
-  .note h2{ margin:0 0 8px; font-size:1.15rem; }
-  .note p{ margin:0 0 12px; font-size:17px; line-height:1.5; }
+  @keyframes slideDown{ from{ opacity:0; transform:translateY(-8px); } to{ opacity:1; transform:translateY(0); } }
   #updateOverlay{ position:fixed; inset:0; background:rgba(255,255,255,.96); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:12px; text-align:center; padding:24px; }
   #updateOverlay.show{ display:flex; }
+
+  /* ── tablet (legacy body.tablet: 20 px base, 620 px column, no divider, summary always open) ── */
+  @media (min-width:768px){
+    :root{ --k:1; }
+    html{ font-size:20px; }
+    html, body{ background:#e8e8e8; }
+    .page{ max-width:620px; margin:0 auto; padding:16px; }
+    .title{ font-size:36px; } .subtitle{ font-size:40px; }
+    .beta-pill{ display:inline-block; width:auto; font-size:20px; padding:6px 28px; letter-spacing:.12em; }
+    .header-status{ font-size:26px; }
+    header{ border-radius:16px; }
+    .login-bar{ padding:8px 12px; gap:8px; }
+    .login-input{ font-size:16px; padding:10px 14px; }
+    .login-btn{ font-size:15px; padding:10px 18px; }
+    .login-hint{ font-size:14px; }
+    .welcome-pill{ font-size:20px; padding:6px 18px; }
+    .link-btn{ font-size:15px; }
+    .qual-card{ border-radius:16px; padding:16px; }
+    .qual-date{ font-size:22px; }
+    .format-badge{ font-size:16px; padding:3px 14px; }
+    .qual-time{ font-size:18px; } .qual-location{ font-size:20px; } .qual-fee{ font-size:16px; }
+    .elig-badge{ font-size:14px; padding:6px 12px; border-radius:10px; }
+    .card-note, .card-after{ font-size:15px; }
+    .register-btn{ font-size:18px; padding:12px 36px; }
+    .msg{ font-size:16px; border-radius:16px; }
+    .ineligible-banner, .status-banner, .not-found-card, .info-card{ font-size:16px; border-radius:16px; }
+    .contact-btn{ font-size:15px; border-radius:16px; }
+    .contact-banner{ font-size:30px; padding:22px 10px; border-radius:16px; }
+    .reg-summary{ border-radius:16px; }
+    .reg-summary-icon{ width:28px; height:28px; font-size:14px; }
+    .reg-summary-title{ font-size:20px; }
+    .reg-summary-count{ min-width:24px; height:24px; font-size:14px; padding:0 6px; }
+    .reg-summary-chevron{ display:none; }
+    .reg-summary-format{ font-size:15px; padding:3px 12px; }
+    .reg-summary-date{ font-size:18px; } .reg-summary-location{ font-size:15px; }
+    .reg-summary-item{ border-radius:12px; padding:8px 12px; }
+    .reg-summary .reg-summary-body{ max-height:900px; visibility:visible; border-top:1px solid rgba(0,49,161,.12); }
+    .section-divider{ display:none !important; }
+    .eligibility-note{ font-size:14px; margin-bottom:10px; padding:10px 14px; border-radius:10px; }
+    .modal-panel{ border-radius:16px; padding:24px 20px 20px; }
+    .modal-title{ font-size:20px; } .modal-message{ font-size:16px; } .modal-btn{ font-size:16px; padding:12px 0; }
+    footer{ font-size:13px; }
+  }
+
+  /* ── desktop (legacy body.desktop: 14 px base, 900 px, SATURDAY / SUNDAY grid, row cards, no summary) ── */
+  @media (min-width:1200px){
+    html{ font-size:14px; }
+    .page{ max-width:900px; padding:16px 24px; }
+    header{ padding:18px 24px 14px; margin-bottom:12px; border-radius:12px; box-shadow:0 3px 12px rgba(0,0,0,.2); }
+    .title{ font-size:42px; line-height:1.1; } .subtitle{ font-size:48px; }
+    .subtitle-group{ margin-top:6px; }
+    .beta-pill{ margin-top:8px; }
+    .header-status{ display:none; }
+    .login-bar{ max-width:500px; padding:6px 10px; gap:8px; margin-bottom:10px; }
+    .login-input{ font-size:14px; padding:8px 14px; min-height:40px; }
+    .login-btn{ font-size:13px; padding:8px 16px; letter-spacing:.06em; min-height:40px; }
+    .login-hint{ font-size:12px; margin-top:-4px; }
+    .welcome-pill{ font-size:28px; padding:6px 24px; margin:10px auto 2px; }
+    .link-btn{ font-size:13px; }
+    .eligibility-note{ font-size:12px; margin-bottom:8px; padding:8px 12px; border-radius:8px; }
+    .reg-summary{ display:none !important; }
+    .msg{ font-size:13px; border-radius:8px; padding:10px 14px; margin-bottom:10px; }
+    .ineligible-banner, .status-banner{ font-size:13px; border-radius:8px; padding:10px 14px; margin-bottom:10px; }
+    .not-found-card{ font-size:13px; border-radius:8px; padding:14px; max-width:420px; margin:0 auto 10px; }
+    .info-card{ font-size:13px; border-radius:8px; padding:14px; margin-top:12px; }
+    .contact-btn{ font-size:12px; border-radius:6px; max-width:200px; margin:0 auto; display:flex; padding:8px; min-height:40px; }
+    .contact-banner{ font-size:18px; padding:14px 10px; border-radius:10px; max-width:400px; margin:0 auto; }
+    .modal-panel{ border-radius:12px; padding:18px 20px 16px; max-width:380px; }
+    .modal-title{ font-size:15px; } .modal-message{ font-size:13px; margin-bottom:14px; } .modal-btn{ font-size:13px; padding:8px 0; min-height:40px; }
+    footer{ font-size:11px; margin-top:12px; }
+
+    #cards.grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .grid-col-header{ font-size:15px; font-weight:800; color:#555; text-align:center; text-transform:uppercase; letter-spacing:.12em; padding:0 0 4px; }
+    .day-cell{ display:flex; flex-direction:column; gap:10px; }
+    .day-wide{ grid-column:1 / -1; }
+    #cards .qual-card{ border-radius:10px; padding:10px; margin-bottom:0; box-shadow:0 2px 6px rgba(0,0,0,.1);
+      display:grid; grid-template-columns:76px 1fr 160px; align-items:center; transition:transform .15s ease, box-shadow .15s ease; }
+    #cards:not(.grid) .qual-card{ margin-bottom:10px; }
+    #cards .qual-card:hover:not(.card-empty){ transform:translateY(-2px); box-shadow:0 6px 20px rgba(0,0,0,.15); }
+    .qual-card .badges{ grid-column:1; grid-row:1 / span 7; display:flex; flex-direction:column; align-items:center; gap:4px; margin:0; }
+    .format-badge{ font-size:14px; padding:5px 12px; }
+    .format-badge.test-badge{ margin-left:0; }
+    .qual-card > .register-btn{ grid-column:3; grid-row:1 / span 7; align-self:center; justify-self:center; font-size:15px; padding:7px 14px; margin:0; min-height:40px; }
+    .qual-card > .qual-date, .qual-card > .qual-location, .qual-card > .qual-time, .qual-card > .qual-fee,
+    .qual-card > .elig-badge, .qual-card > .card-note, .qual-card > .card-after{ grid-column:2; }
+    .qual-date{ font-size:19px; margin-bottom:1px; order:0; }
+    .qual-location{ font-size:15px; margin:0; order:1; text-decoration-color:rgba(0,49,161,.25); }
+    .qual-time{ font-size:14px; margin:0; order:2; }
+    .qual-fee{ font-size:13px; margin:0; order:3; }
+    .elig-badge{ font-size:11px; padding:4px 10px; margin:4px 0 0; justify-self:stretch; width:auto; border-radius:8px; order:4; }
+    .card-note{ font-size:12px; margin:4px 0 0; width:auto; order:5; }
+    .card-after{ font-size:12px; margin:4px 0 0; order:6; }
+    .qual-card.card-closed{ opacity:.75; } .qual-card.card-closed.card-registered{ opacity:.88; }
+    #cards .qual-card.card-empty{ display:flex; flex-direction:column; justify-content:center; align-items:center; background:transparent; border:1px dashed #bbb; box-shadow:none; min-height:60px; }
+    .empty-day{ font-size:13px; font-weight:700; color:#777; }
+    .empty-msg{ font-size:11px; color:#888; font-style:italic; margin-top:2px; }
+    .register-btn:hover:not(:disabled), .login-btn:hover:not(:disabled){ filter:brightness(1.08); }
+    .modal-btn:hover{ filter:brightness(1.06); }
+  }
 </style>
 </head>
 <body>
   <div id="updateOverlay"><div class="spin"></div><div><b>Updating…</b><br>Grabbing the latest version.</div></div>
-  <div class="spm-page spm-wide">
-    <header class="spm-header">
-      <h1>MultiPass 🎱</h1>
-      <p class="spm-subtitle">South Portland Metro APA · singles qualifiers</p>
+  <div class="page">
+    <header>
+      <h1 class="title">South Portland Metro APA</h1>
+      <div class="subtitle-group">
+        <div class="subtitle">MultiPass</div>
+        <div class="beta-pill">Singles Qualifier Registration</div>
+      </div>
+      <div class="header-status" id="statusText"></div>
     </header>
-    <div class="spm-shell">
-      <main class="spm-card">
-        <div class="ctl" id="ctl" hidden><span id="whoami" class="sub" style="margin:0"></span><button type="button" id="logout">Log out</button></div>
-        <div id="msg" aria-live="polite"></div>
-        <div id="app"></div>
-      </main>
-      <aside class="spm-rail" id="rail" aria-live="polite"></aside>
+
+    <div id="msg" aria-live="polite"></div>
+
+    <!-- compact sign-in bar (legacy shape). It EMAILS a sign-in link; it never looks anyone up. Hidden once signed in. -->
+    <form class="login-bar" id="signin" autocomplete="off" hidden>
+      <input id="ident" class="login-input" type="text" inputmode="email" autocomplete="email" enterkeyhint="send" placeholder="Email or APA #" aria-label="Email or APA number">
+      <input class="hp" type="text" name="website" id="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <button id="send" class="login-btn" type="submit">SIGN IN</button>
+    </form>
+    <p class="login-hint" id="signinHint" hidden>We email you a sign-in link. No password needed.</p>
+    <div class="not-found-card" id="notFound" hidden>
+      <div class="error-content">
+        <p><strong>Having trouble signing in?</strong></p>
+        <ul>
+          <li><strong>Used your email?</strong> We may have a different email on file. Try your APA member number instead.</li>
+          <li><strong>Used your APA #?</strong> Double-check the number. It is on your APA membership card.</li>
+        </ul>
+        <p><strong>Heads up:</strong> the sign-in link and your confirmations go to the email on your APA record. If it needs updating, let us know.</p>
+      </div>
+      <a class="contact-btn" href="https://linktr.ee/spmContactUs" target="_blank" rel="noopener">Contact Us</a>
     </div>
-    <div class="spm-footer">MultiPass v<span id="verLabel"></span> · South Portland Metro APA</div>
+
+    <div class="welcome" id="welcome" hidden>
+      <div class="welcome-pill" id="welcomePill"></div>
+      <button type="button" class="link-btn" id="logout">Not you? Sign out</button>
+    </div>
+
+    <div id="app"></div>
+
+    <footer><div>South Portland Metro APA</div><div>MultiPass v<span id="verLabel"></span></div></footer>
   </div>
 
 <script>
@@ -132,11 +390,11 @@
       .then(r => r.json()).catch(() => ({ ok: false, offline: true, error: 'We lost the connection. Check your signal and try again.' }))
       .finally(() => clearTimeout(t));
   };
-  /* The league office, reachable from every "contact the office" line (nemesis player lens: a dead end otherwise). */
-  const OFFICE_TEXT = 'https://bit.ly/spmtextus', OFFICE_EMAIL = 'soldans@southportlandmetroapa.com';
-  const CAL_URL = 'https://southportlandmetroapa.github.io/calendarviewer/';
-  const S = { token: null, firstName: '', me: null, events: [], maintenance: false, busy: false, loading: false, offline: false, flash: null };
+  /* The league's contact page: the legacy "Questions? Hit Us Up" target, reachable from every dead end. */
+  const CONTACT_URL = 'https://linktr.ee/spmContactUs';
+  const S = { token: null, firstName: '', name: '', me: null, events: [], pub: [], maintenance: false, busy: false, loading: false, offline: false, regOpen: true, painted: false };
   const app = $('app');
+  const DESK = matchMedia('(min-width:1200px)');   /* the legacy desktop layout: SATURDAY / SUNDAY grid */
   $('verLabel').textContent = window.APP_VERSION + (IS_PREPROD ? ' preprod' : '');
   if (IS_PREPROD) {
     const bar = document.createElement('div');
@@ -150,224 +408,318 @@
 
   /* ── formatting (Pacific time, always) ── */
   const fmtLabel = f => f === '9' ? '9-Ball' : '8-Ball';
+  const fmtClass = f => f === '9' ? 'format-9' : 'format-8';
   const dPart = (iso, o) => new Intl.DateTimeFormat('en-US', Object.assign({ timeZone: TZ }, o)).format(new Date(iso));
-  const dayText = iso => dPart(iso, { weekday: 'short', month: 'short', day: 'numeric' });
   const longDay = iso => dPart(iso, { weekday: 'long', month: 'long', day: 'numeric' });
+  const monthDay = iso => dPart(iso, { month: 'long', day: 'numeric' });
   const timeText = iso => dPart(iso, { hour: 'numeric', minute: '2-digit' });
+  const ymdOf = iso => new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+  /* calendar-day arithmetic on YYYY-MM-DD, from the event's own date (the legacy grid hard-coded the year 2026) */
+  const addDays = (ymd, n) => { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const ymdLabel = ymd => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'long', day: 'numeric' }).format(new Date(ymd + 'T12:00:00Z'));
   const money = n => '$' + (Number(n) % 1 ? Number(n).toFixed(2) : String(Number(n)));
   const mapUrl = e => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([e.venue_name, e.venue_address].filter(Boolean).join(', '));
   /* An event is over once its last boards have started plus a little play time (or 9 h after the start). */
   const isOver = e => Date.now() > (e.last_board_at ? Date.parse(e.last_board_at) + 2 * 3600e3 : Date.parse(e.starts_at) + 9 * 3600e3);
 
-  /* ── shared pieces ── */
+  /* ── page pieces ── */
+  function setStatus(n) { $('statusText').textContent = n ? n + ' qualifier' + (n === 1 ? '' : 's') + ' available' : ''; }
+  function showMsg(type, text) { $('msg').innerHTML = type ? '<div class="msg msg-' + type + '">' + esc(text) + '</div>' : ''; }
+  /* Page-level pieces OUTSIDE #app follow the sign-in state on every render: a sign-out must clear the welcome pill,
+     never leave the last person's name on screen (CrewCall chrome() pattern). */
+  function chrome() {
+    const inn = !!S.token;
+    $('signin').hidden = inn; $('signinHint').hidden = inn;
+    if (inn) $('notFound').hidden = true;
+    $('welcome').hidden = !inn;
+    $('welcomePill').textContent = inn ? 'Welcome, ' + (S.name || S.firstName || 'player') + '!' : '';
+  }
+  function contactHtml() {
+    return '<div class="contact-wrap"><a class="contact-banner" href="' + CONTACT_URL + '" target="_blank" rel="noopener">Questions? Hit Us Up</a></div>';
+  }
   function howItWorks() {
-    return '<div class="how"><h2>How a Play Til You Win qualifier works</h2><ul>'
+    return '<div class="info-card how"><p><strong>How a Play Til You Win qualifier works</strong></p><ul>'
       + '<li><b>Four-player boards, single elimination.</b> Win your board and you qualify for the Singles Regionals.</li>'
       + '<li><b>Lose and play again.</b> Enter another board for free, until you qualify or decide you are done.</li>'
       + '<li><b>One payment covers the day.</b> Pay at the door, cash or Venmo. A new day is a new entry fee.</li>'
       + '<li><b>Who can play:</b> APA members 18 and over, on an active team in that format, with at least 10 league match scores in that format in the last two years.</li>'
-      + '<li><b>Walk-ins are welcome.</b> Signing up here just helps us plan boards.</li></ul></div>'
-      + contactHtml();
-  }
-  function contactHtml() {
-    return '<div class="how" id="contact"><h2>Questions, or something looks wrong?</h2>'
-      + '<p style="margin:0 0 8px">The league office can check your team, your eligibility, or sign you up by hand.</p>'
-      + '<div class="ev-actions"><a class="btn ghost small" href="' + OFFICE_TEXT + '" target="_blank" rel="noopener">Text the league office</a>'
-      + '<a class="btn ghost small" href="mailto:' + OFFICE_EMAIL + '?subject=MultiPass">Email the league office</a>'
-      + '<a class="btn ghost small" href="' + CAL_URL + '" target="_blank" rel="noopener">League calendar</a></div></div>';
+      + '<li><b>Walk-ins are welcome.</b> Signing up here just helps us plan boards.</li></ul></div>';
   }
   function showOffline(retry) {
     S.offline = true;   /* the live poll stands down: there is no fresh view to compare against */
-    app.innerHTML = '<div class="empty">We could not reach the league server. Check your signal, then try again. You are still signed in.'
-      + '<br><button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>' + contactHtml();
+    $('signin').hidden = true; $('signinHint').hidden = true;
+    app.innerHTML = '<div class="msg msg-error">We could not reach the league server. Check your signal, then try again. You are still signed in.</div>'
+      + '<button type="button" class="register-btn" id="retry">Try Again</button><div style="height:14px"></div>' + contactHtml();
     $('retry').onclick = retry;
   }
-  function cardHtml(e, signedIn) {
-    const nine = e.format === '9';
-    /* venue as plain text + a full-size Directions button: an inline link is a sub-48 px tap target on a phone */
-    const where = e.venue_name ? '<b>' + esc(e.venue_name) + '</b>'
-      + (e.venue_address ? '<br><span class="ev-muted">' + esc(e.venue_address) + '</span>' : '') : '<span class="ev-muted">Venue to be announced</span>';
-    const dirs = e.venue_name ? '<a class="btn ghost small" href="' + mapUrl(e) + '" target="_blank" rel="noopener">Directions</a>' : '';
+
+  /* One qualifier card, legacy order: date, format pill, time, venue (a Maps link), fee, eligibility, button.
+     inCol = the desktop SATURDAY / SUNDAY column already names the weekday. */
+  function cardHtml(e, signedIn, inCol) {
+    const reg = signedIn && e.my_status === 'registered';
+    const started = Date.now() >= Date.parse(e.starts_at);            /* the server stops cancels at the start */
+    const closed = signedIn ? !e.open : Date.now() >= Date.parse(e.cutoff_at || e.starts_at);
+    const blocked = signedIn && !reg && !closed && !e.can_register;  /* not on a team, marked ineligible, qualified, paused */
+    const el = e.eligibility === 'eligible' ? ['confirmed', 'elig-eligible', 'Eligibility Confirmed']
+             : e.eligibility === 'ineligible' ? ['ineligible', 'elig-ineligible', 'Not Eligible'] : ['pending', 'elig-pending', 'Eligibility Pending'];
+    const cls = 'qual-card' + (reg ? ' card-registered card-elig-' + el[0] : '') + (closed ? ' card-closed' : '')
+      + (!signedIn || blocked ? ' card-disabled' : '') + (S.painted ? '' : ' anim');
     const cost = money(Number(e.entry_fee) + Number(e.greens_fee));
-    let html = '<div class="ev' + (e.my_status === 'registered' ? ' mine' : '') + '" data-ev="' + e.id + '">'
-      + '<div class="ev-top"><div class="ev-date">' + esc(dayText(e.starts_at)) + '</div><div><span class="pill' + (nine ? ' nine' : '') + '">' + fmtLabel(e.format) + '</span>'
-      + (e.is_test ? '<span class="pill test">TEST</span>' : '') + '</div></div>'
-      + '<p class="ev-line">Doors open ' + esc(timeText(e.starts_at)) + (e.last_board_at ? '. Last new boards start at ' + esc(timeText(e.last_board_at)) : '') + '.</p>'
-      + '<p class="ev-line">' + where + '</p>'
-      + '<p class="ev-line">' + cost + ' for the day <span class="ev-muted">(' + money(e.entry_fee) + ' entry plus ' + money(e.greens_fee) + ' greens fee), pay at the door</span></p>';
-    if (!signedIn) return html + (dirs ? '<div class="ev-actions">' + dirs + '</div>' : '') + '</div>';
-    if (e.my_status === 'registered') {
-      html += '<p class="ev-state in">You are registered. ' + (e.paid ? 'Paid.' : 'Pay at the door.') + '</p>'
-        + (e.qualified ? '<div class="ev-why">You already qualified in ' + fmtLabel(e.format) + ', so you do not need this one. Cancel it to free up the spot.</div>' : '')
-        + '<div class="ev-actions"><button type="button" class="btn ghost small" data-cancel="' + e.id + '">Cancel my spot</button>' + dirs + '</div>';
-    } else if (e.can_register) {
-      html += '<div class="ev-actions"><button type="button" class="btn small" data-reg="' + e.id + '">Sign me up</button>' + dirs + '</div>';
-    } else {
-      html += (e.why_text ? '<div class="ev-why">' + esc(e.why_text) + '</div>' : '') + (dirs ? '<div class="ev-actions">' + dirs + '</div>' : '');
-    }
-    return html + '</div>';
+    const where = e.venue_name ? '<a class="qual-location" href="' + mapUrl(e) + '" target="_blank" rel="noopener" title="' + esc(e.venue_address || 'Directions') + '">' + esc(e.venue_name) + '</a>'
+      : '<div class="qual-location tba">Venue to be announced</div>';
+    let btn, note = '', after = '';
+    if (!signedIn) btn = closed ? '<button type="button" class="register-btn btn-closed" disabled>Closed</button>'
+      : '<button type="button" class="register-btn btn-signin-required" data-signin>Sign In to Register</button>';
+    else if (reg && !closed) btn = '<button type="button" class="register-btn btn-cancel' + (e.format === '9' ? ' btn-cancel-9' : '') + '" data-cancel="' + e.id + '">Cancel</button>';
+    else if (reg && !started) btn = '<button type="button" class="register-btn btn-closed-cancel" data-cancel="' + e.id + '">Closed · Cancel</button>';
+    else if (closed) btn = '<button type="button" class="register-btn btn-closed" disabled>Closed</button>';
+    else if (e.can_register) btn = '<button type="button" class="register-btn" data-reg="' + e.id + '">Register</button>';
+    else btn = '<button type="button" class="register-btn" disabled>Register</button>';
+    if (blocked && e.why_text) note = '<div class="card-note">' + esc(e.why_text) + '</div>';
+    if (reg && e.qualified) note = '<div class="card-note">You already qualified in ' + fmtLabel(e.format) + ', so you do not need this one. Cancel it to free up the spot.</div>';
+    if (closed && !reg) after = '<div class="card-after">Online registration for this qualifier has closed. Walk-ins are welcome on the day.</div>';
+    return '<div class="' + cls + '" data-ev="' + e.id + '">'
+      + '<div class="qual-date">' + esc(inCol ? monthDay(e.starts_at) : longDay(e.starts_at)) + '</div>'
+      + '<div class="badges"><span class="format-badge ' + fmtClass(e.format) + '">' + fmtLabel(e.format) + '</span>'
+      + (e.is_test ? '<span class="format-badge test-badge">TEST</span>' : '') + '</div>'
+      + '<div class="qual-time">Doors ' + esc(timeText(e.starts_at)) + (e.last_board_at ? ' · Last boards ' + esc(timeText(e.last_board_at)) : '') + '</div>'
+      + where
+      + '<div class="qual-fee' + (reg && e.paid ? ' paid' : '') + '">' + cost + (reg && e.paid ? ' · Paid' : ' for the day · pay at the door') + '</div>'
+      + (reg ? '<span class="elig-badge ' + el[1] + '">' + el[2] + '</span>' : '')
+      + note + btn + after + '</div>';
+  }
+  /* Desktop: a weekend per row, Saturday left, Sunday right, a dashed slot for a weekend day with nothing on it.
+     A weekday event gets a full-width row. Days come from each event's own Pacific date. */
+  function gridHtml(evs, signedIn) {
+    const rows = [], byKey = new Map();
+    evs.forEach(e => {
+      const wd = dPart(e.starts_at, { weekday: 'short' }), day = ymdOf(e.starts_at);
+      const slot = wd === 'Sat' ? 'sat' : wd === 'Sun' ? 'sun' : 'day';
+      const sat = slot === 'sun' ? addDays(day, -1) : day, key = (slot === 'day' ? 'd' : 'w') + sat;
+      let row = byKey.get(key);
+      if (!row) { row = { sat: sat, sat_: [], sun_: [], day_: [] }; byKey.set(key, row); rows.push(row); }
+      row[slot + '_'].push(e);
+    });
+    rows.sort((a, b) => a.sat < b.sat ? -1 : a.sat > b.sat ? 1 : 0);
+    const cell = (list, ymd) => '<div class="day-cell">' + (list.length ? list.map(e => cardHtml(e, signedIn, true)).join('')
+      : '<div class="qual-card card-empty"><div class="empty-day">' + esc(ymdLabel(ymd)) + '</div><div class="empty-msg">No qualifier scheduled</div></div>') + '</div>';
+    const weekend = rows.some(r => r.sat_.length || r.sun_.length);
+    return '<div id="cards"' + (weekend ? ' class="grid"' : '') + '>'
+      + (weekend ? '<div class="grid-col-header">Saturday</div><div class="grid-col-header">Sunday</div>' : '')
+      + rows.map(r => r.day_.length ? '<div class="day-cell day-wide">' + r.day_.map(e => cardHtml(e, signedIn, false)).join('') + '</div>'
+                                    : cell(r.sat_, r.sat) + cell(r.sun_, addDays(r.sat, 1))).join('') + '</div>';
+  }
+  /* The schedule block, legacy order: divider, contact banner, 10-scores note, the cards. */
+  function scheduleHtml(evs, signedIn) {
+    const list = !evs.length ? '<div id="cards"><div class="msg msg-info">No qualifier events are currently scheduled.</div></div>'
+      : DESK.matches ? gridHtml(evs, signedIn) : '<div id="cards">' + evs.map(e => cardHtml(e, signedIn, false)).join('') + '</div>';
+    const out = '<div class="section-divider"><span>Available Qualifiers</span></div>' + contactHtml()
+      + '<div class="eligibility-note">&#9888;&#65039; You must have at least 10 scores in the format within the last 2 years to qualify.</div>'
+      + list + howItWorks();
+    S.painted = true;   /* the slide-in plays on the first paint only, not on every live refresh */
+    return out;
+  }
+  function wire() {
+    app.querySelectorAll('[data-reg]').forEach(b => b.onclick = () => register(+b.dataset.reg));
+    app.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => confirmCancel(+b.dataset.cancel));
+    app.querySelectorAll('[data-signin]').forEach(b => b.onclick = () => { scrollTo({ top: 0, behavior: 'smooth' }); $('ident').focus({ preventScroll: true }); });
+    app.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => gotoCard(+b.dataset.goto));
+    const bar = $('regBar');
+    if (bar) bar.onclick = () => { S.regOpen = !S.regOpen; $('regSummary').classList.toggle('expanded', S.regOpen); bar.setAttribute('aria-expanded', String(S.regOpen)); };
+  }
+  function gotoCard(id) {
+    const c = app.querySelector('[data-ev="' + id + '"]'); if (!c) return;
+    c.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 800);
   }
 
-  /* ── signed out: the public schedule + sign-in ── */
+  /* ── signed out: the public schedule + the sign-in bar ── */
   async function loadPublic() {
     try {
-      const r = await fetch(SB_URL + '/rest/v1/events?select=id,format,title,starts_at,last_board_at,venue_name,venue_address,entry_fee,greens_fee,regionals_season&order=starts_at',
+      const r = await fetch(SB_URL + '/rest/v1/events?select=id,format,title,starts_at,last_board_at,venue_name,venue_address,entry_fee,greens_fee,cutoff_at,regionals_season&order=starts_at',
         { headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Accept-Profile': 'multipass' } });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return (await r.json()).filter(e => !isOver(e));
     } catch (e) { return null; }
   }
+  function renderPublic() {
+    setStatus(S.pub.length);
+    app.innerHTML = scheduleHtml(S.pub, false);
+    wire();
+  }
   async function showSignedOut(msg) {
-    S.token = null; S.me = null; S.offline = false; renderRail();
-    $('ctl').hidden = true;
+    S.token = null; S.me = null; S.name = ''; S.offline = false; chrome();
+    if (msg) showMsg('error', msg);
     app.innerHTML = '<div class="center"><span class="spin"></span></div>';
     const seed = fetchDataPulse('index');                     /* sampled BEFORE the data (see showSignedIn) */
     const evs = await loadPublic();
     seed.then(p => { if (p !== null && !S.token) { _dataPulse = p; _dataPulseKey = 'index'; } });
     if (S.token) return;   /* signed in while we were loading */
-    const list = evs === null ? '<div class="empty">We could not load the schedule. <button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>'
-      : evs.length ? evs.map(e => cardHtml(e, false)).join('')
-      : '<div class="empty">No qualifiers are open for sign-up right now. Check the league calendar for what is coming up.</div>';
-    app.innerHTML = '<p class="lead">Sign up for an SPM singles qualifier. Win a board and you go to the Singles Regionals.</p>'
-      + (msg ? '<div class="err" style="margin:0 0 12px">' + esc(msg) + '</div>' : '')
-      + '<div id="signin" style="margin-bottom:16px"><label class="lbl" for="ident" style="margin-top:0">Sign in to sign up</label>'
-      + '<p class="sub">Use the email or APA number on your record. We email you a link, no password. If you are signed in to another SPM app on this device, you are already signed in here.</p>'
-      + '<input id="ident" type="text" autocomplete="email" inputmode="email" placeholder="Email or APA number">'
-      + '<input class="hp" type="text" name="website" id="hp" tabindex="-1" autocomplete="off" aria-hidden="true">'
-      + '<div class="err" id="err"></div><button type="button" class="btn" id="send">Email me a sign-in link</button>'
-      + '<p class="fine">The link goes only to the email on your APA record.</p></div>'
-      + '<span class="lbl">Open qualifiers</span>' + list + howItWorks();
-    if ($('retry')) $('retry').onclick = () => showSignedOut();
-    $('send').onclick = async () => {
-      const v = $('ident').value.trim(); if (!v) { $('err').textContent = 'Enter your email or APA number.'; return; }
-      $('send').disabled = true; $('err').textContent = '';
-      const r = await spmAuth.requestLink(v, 'multipass', $('hp').value);
-      if (!r.ok) { $('err').textContent = r.error || 'Something went wrong.'; $('send').disabled = false; return; }
-      $('signin').innerHTML = '<h2 style="margin:0 0 8px">Check your email' + (r.first_name ? ', ' + esc(r.first_name) : '') + '.</h2>'
-        + '<p class="lead">We sent a sign-in link to the address on your APA record. It works for 30 minutes and keeps you signed in on this device.</p>'
-        + '<button type="button" class="btn ghost" id="again">Use a different email or number</button>';
-      $('again').onclick = () => showSignedOut();
-    };
+    if (evs === null) {
+      setStatus(0);
+      app.innerHTML = '<div class="msg msg-error">We could not load the schedule.</div><button type="button" class="register-btn" id="retry">Try Again</button>';
+      $('retry').onclick = () => showSignedOut();
+      return;
+    }
+    S.pub = evs; renderPublic();
   }
+  $('signin').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const v = $('ident').value.trim();
+    if (!v) { showMsg('error', 'Please enter your email address or APA number.'); $('ident').focus(); return; }
+    $('send').disabled = true; $('ident').disabled = true; $('send').textContent = 'SENDING…';
+    showMsg(null); $('notFound').hidden = true;
+    const r = await spmAuth.requestLink(v, 'multipass', $('hp').value).catch(() => ({ ok: false, error: 'We lost the connection. Check your signal and try again.' }));
+    $('send').disabled = false; $('ident').disabled = false; $('send').textContent = 'SIGN IN';
+    if (!r || !r.ok) { showMsg('error', (r && r.error) || 'Something went wrong. Please try again.'); $('notFound').hidden = false; return; }
+    $('ident').value = '';
+    showMsg('info', 'Check your email' + (r.first_name ? ', ' + r.first_name : '') + '. We sent a sign-in link to the address on your APA record. It works for 30 minutes and keeps you signed in on this device.');
+  });
 
-  /* ── signed in ── */
+  /* ── signed in ──
+     Exceptions only, legacy style: the yellow "not an active player" banner, a not-eligible or qualified banner per
+     format. The ordinary cases are on the cards (eligibility badge) and the 10-scores note. */
   function formatStatus(evs) {
     const out = [];
     const groups = [];
     ['8', '9'].forEach(f => { [...new Set(evs.filter(e => e.format === f).map(e => e.regionals_season))].forEach(season => groups.push([f, season])); });
+    /* rostered comes from the server per event; a pause or a cutoff no longer masks "not on a team" */
+    const notOn = groups.filter(([f, season]) => !evs.some(e => e.format === f && e.regionals_season === season && e.rostered));
+    if (groups.length && notOn.length === groups.length && !evs.some(e => e.qualified)) {
+      return '<div class="ineligible-banner"><div class="error-content">'
+        + '<p><strong>We found your account, but you are not currently listed as an active player this session.</strong></p>'
+        + '<p>This can happen if:</p><ul>'
+        + '<li>You were <strong>recently added</strong> to a team and our roster has not updated yet</li>'
+        + '<li>You are <strong>not yet on a team</strong> but would like to join one</li>'
+        + '<li>There is a <strong>data issue</strong> on our end</li></ul>'
+        + '<p>Please reach out (Questions? Hit Us Up, below) and we will get it sorted!</p></div></div>';
+    }
     groups.forEach(([f, season]) => {
       const mine = evs.filter(e => e.format === f && e.regionals_season === season);
       if (!mine.length) return;
       const many = groups.filter(g => g[0] === f).length > 1;
       const L = fmtLabel(f) + (many ? ' for ' + season + ' Regionals' : '');
-      if (mine.some(e => e.qualified)) { out.push('<div class="fmt-status good"><b>' + L + ': you qualified for Regionals.</b> Congratulations. No need to play another ' + L + ' qualifier.</div>'); return; }
-      /* rostered comes from the server per event; a pause or a cutoff no longer masks "not on a team" */
-      if (!mine.some(e => e.rostered)) { out.push('<div class="fmt-status stop"><b>' + L + ': we do not see you on a ' + L + ' team this session.</b> You need one to sign up online. If that is wrong, contact the league office (buttons below) and we will add you.</div>'); return; }
+      if (mine.some(e => e.qualified)) { out.push('<div class="status-banner good"><b>' + L + ': you qualified for Regionals.</b> Congratulations. No need to play another ' + fmtLabel(f) + ' qualifier.</div>'); return; }
+      if (!mine.some(e => e.rostered)) { out.push('<div class="ineligible-banner"><b>We do not see you on a ' + fmtLabel(f) + ' team this session</b>, so you cannot register online for ' + L + '. If that is wrong, reach out below and we will add you.</div>'); return; }
       const el = (mine.find(e => e.eligibility) || {}).eligibility || 'unconfirmed';
-      const open = mine.some(e => e.can_register || e.my_status === 'registered');
-      if (el === 'ineligible') out.push('<div class="fmt-status stop"><b>' + L + ': the league office has you as not eligible.</b> If that is wrong, contact the office (buttons below).</div>');
-      else if (el === 'eligible') out.push('<div class="fmt-status good"><b>' + L + ': you are all set.</b> The league office confirmed you meet the singles rules.</div>');
-      else out.push('<div class="fmt-status warn"><b>' + L + (open ? ': you can sign up.' : ': on a team, good.') + '</b> The league office still confirms the rule of at least 10 league match scores in ' + L + ' in the last two years. We will be in touch if there is a problem.</div>');
+      if (el === 'ineligible') out.push('<div class="status-banner stop"><b>' + L + ': the league office has you as not eligible.</b> If that is wrong, reach out below.</div>');
     });
     return out.join('');
+  }
+  function regSummaryHtml(evs) {
+    const mine = evs.filter(e => e.my_status === 'registered');
+    if (!mine.length) { S.regOpen = true; return ''; }   /* it opens again the next time it appears (legacy) */
+    return '<div class="reg-summary' + (S.regOpen ? ' expanded' : '') + '" id="regSummary">'
+      + '<button type="button" class="reg-summary-bar" id="regBar" aria-expanded="' + S.regOpen + '"><span class="reg-summary-icon" aria-hidden="true">&#10003;</span>'
+      + '<span class="reg-summary-title">Your Registrations</span><span class="reg-summary-count">' + mine.length + '</span><span class="reg-summary-chevron" aria-hidden="true">&#9660;</span></button>'
+      + '<div class="reg-summary-body"><div class="reg-summary-list">'
+      + mine.map(e => '<button type="button" class="reg-summary-item" data-goto="' + e.id + '"><span class="reg-summary-format ' + fmtClass(e.format) + '">' + fmtLabel(e.format) + '</span>'
+        + '<span class="reg-summary-details"><span class="reg-summary-date">' + esc(longDay(e.starts_at)) + '</span>'
+        + '<span class="reg-summary-location">' + esc(e.venue_name || 'Venue to be announced') + (e.paid ? ' · Paid' : '') + '</span></span></button>').join('')
+      + '</div></div></div>';
   }
   async function loadSignedIn() {
     const r = await gas('mp_context', { token: S.token, include_test: IS_PREPROD });
     if (!r.ok) { if (spmAuth.isAuthErr(r.error)) return handleSessionErr(r.error); return { error: r.error || 'Could not load your qualifiers.', offline: !!r.offline }; }
-    S.me = r.me; S.maintenance = !!r.maintenance;
+    S.me = r.me; S.maintenance = !!r.maintenance; if (r.me && r.me.name) S.name = r.me.name;
     S.events = (r.events || []).filter(e => !isOver(e));
     return { ok: true };
   }
   async function showSignedIn() {
-    $('ctl').hidden = false; $('whoami').textContent = S.firstName ? 'Signed in as ' + S.firstName : 'Signed in';
-    if (!S.me) app.innerHTML = '<div class="center"><span class="spin"></span><p class="sub" style="margin-top:12px">Loading your qualifiers…</p></div>';
+    chrome();
+    if (!S.me) app.innerHTML = '<div class="center"><span class="spin"></span><p style="margin-top:12px">Loading your qualifiers…</p></div>';
     const seed = S.token ? fetchDataPulse(S.token) : null;   /* sampled BEFORE the data: a change landing in between re-renders once, never vanishes */
     S.loading = true;
     const res = await loadSignedIn().finally(() => { S.loading = false; });
     if (seed) { const k = S.token; seed.then(p => { if (p !== null) { _dataPulse = p; _dataPulseKey = k; } }); }
     if (!res) return;   /* session ended → handled */
     if (res.offline) return showOffline(showSignedIn);
-    if (res.error) { app.innerHTML = '<div class="empty">' + esc(res.error) + '<br><button type="button" class="btn ghost small" id="retry" style="margin-top:12px">Try again</button></div>' + contactHtml(); $('retry').onclick = showSignedIn; return; }
+    if (res.error) { app.innerHTML = '<div class="msg msg-error">' + esc(res.error) + '</div><button type="button" class="register-btn" id="retry">Try Again</button><div style="height:14px"></div>' + contactHtml(); $('retry').onclick = showSignedIn; return; }
     render();
   }
   function render() {
-    S.offline = false;
+    S.offline = false; chrome();
     const evs = S.events;
-    /* a confirmation is about the moment it happened: it expires, so it never sits above a card that changed since */
-    const fresh = S.flash && Date.now() - S.flash.at < 20000;
-    const flash = fresh ? '<div class="' + (S.flash.ok ? 'ok-msg' : 'err') + '" style="margin:0 0 12px">' + esc(S.flash.text) + '</div>' : '';
-    app.innerHTML = (S.maintenance ? '<div class="banner"><b>Sign-ups are paused for a few minutes.</b> Please try again shortly.</div>' : '')
-      + flash + formatStatus(evs)
-      + (evs.length ? evs.map(e => cardHtml(e, true)).join('')
-                    : '<div class="empty">No qualifiers are open for sign-up right now. Check the league calendar for what is coming up.</div>')
-      + howItWorks();
-    app.querySelectorAll('[data-reg]').forEach(b => b.onclick = () => register(+b.dataset.reg));
-    app.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => confirmCancel(+b.dataset.cancel));
-    renderRail();
+    setStatus(evs.length);
+    app.innerHTML = (S.maintenance ? '<div class="msg msg-info"><b>Sign-ups are paused for a few minutes.</b> Please try again shortly.</div>' : '')
+      + formatStatus(evs) + regSummaryHtml(evs) + scheduleHtml(evs, true);
+    wire();
   }
   function setBusy(on) { S.busy = on; app.querySelectorAll('button[data-reg],button[data-cancel]').forEach(b => b.disabled = on); }
+
+  /* ── modals (legacy: "You're Registered!", "Cancel Registration", "Registration Failed") ── */
+  function openModal(inner, focusId) {
+    closeModal();
+    const back = document.createElement('div'); back.className = 'modal'; back.id = 'modal';
+    back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true'); back.setAttribute('aria-labelledby', 'modalTitle');
+    back.innerHTML = '<div class="modal-panel">' + inner + '</div>';
+    document.body.appendChild(back);
+    back.addEventListener('click', ev => { if (ev.target === back) closeModal(); });
+    if (focusId && $(focusId)) $(focusId).focus();
+  }
+  function closeModal() { const m = $('modal'); if (m) m.remove(); }
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeModal(); });
+  function infoModal(title, text, extra) {
+    openModal('<div class="modal-title" id="modalTitle">' + esc(title) + '</div><div class="modal-message">' + esc(text) + (extra || '') + '</div>'
+      + '<div class="modal-actions"><button type="button" class="modal-btn modal-btn-ok" id="infoOk">Got It</button></div>', 'infoOk');
+    $('infoOk').onclick = closeModal;
+  }
+  function eligCallout(state) {
+    if (state === 'eligible') return '<div class="elig-callout ok"><b>&#10003; Eligibility Confirmed</b></div>';
+    if (state === 'ineligible') return '<div class="elig-callout stop"><b>&#10005; Not Eligible</b>Contact us if you believe this is an error.</div>';
+    return '<div class="elig-callout warn"><b>&#9888;&#65039; Eligibility Pending</b>The league office still checks the 10-scores rule. Check back here for updates.</div>';
+  }
   async function register(id) {
     if (S.busy) return;                       /* a double tap sends one request; the server's UNIQUE is the real guard */
     const e = S.events.find(x => x.id === id); if (!e) return;
-    setBusy(true); S.flash = null;
-    const btn = app.querySelector('[data-reg="' + id + '"]'); if (btn) { btn.textContent = 'Signing you up…'; btn.classList.add('working'); }   /* the mailer can take 30 s */
+    setBusy(true);
+    const btn = app.querySelector('[data-reg="' + id + '"]'); if (btn) { btn.textContent = 'REGISTERING…'; btn.classList.add('working'); }   /* the mailer can take 30 s */
     const r = await gas('mp_register', { token: S.token, event_id: id });
     if (!r.ok && spmAuth.isAuthErr(r.error)) { setBusy(false); return handleSessionErr(r.error); }
-    S.flash = { at: Date.now(), ok: !!r.ok, text: r.ok ? 'You are signed up for ' + longDay(e.starts_at) + ' (' + fmtLabel(e.format) + '). We emailed you a confirmation with a calendar invite.'
-      : r.offline ? 'We lost the connection before we heard back. Below is where things stand now. If you are not signed up, try again.'
-      : (r.error || 'Something went wrong. Try again.') };
     await showSignedIn(); setBusy(false);   /* busy until the fresh state is on screen: no second tap on a stale card */
+    const now = S.events.find(x => x.id === id) || e;
+    if (r.ok) infoModal('You\'re Registered!', fmtLabel(e.format) + ' qualifier on ' + longDay(e.starts_at) + '.\nA confirmation email with a calendar invite is on its way to the address on your APA record.', eligCallout(now.eligibility));
+    else if (r.offline) infoModal('Connection Lost', 'We lost the connection before we heard back. The page now shows where things stand. If you are not registered, try again.');
+    else infoModal('Registration Failed', r.error || 'Registration failed. Please try again.');
   }
   function confirmCancel(id) {
     const e = S.events.find(x => x.id === id); if (!e || S.busy) return;
-    const back = document.createElement('div'); back.className = 'note-back';
-    back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true'); back.setAttribute('aria-labelledby', 'noteTitle');
-    back.innerHTML = '<div class="note"><h2 id="noteTitle">Cancel your spot?</h2>'
-      + '<p><b>' + esc(longDay(e.starts_at)) + ', ' + fmtLabel(e.format) + '.</b> You can sign up again any time before registration closes, and walk-ins are welcome on the day.</p>'
-      + '<button type="button" class="btn" id="yesCancel">Yes, cancel my spot</button><button type="button" class="btn ghost" id="keep">Keep my spot</button></div>';
-    document.body.appendChild(back);
-    const close = () => back.remove();
-    $('keep').onclick = close;
-    back.addEventListener('click', ev => { if (ev.target === back) close(); });
-    document.addEventListener('keydown', function k(ev) { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', k); } });
+    openModal('<div class="modal-title" id="modalTitle">Cancel Registration</div>'
+      + '<div class="modal-message">' + esc(fmtLabel(e.format) + ' qualifier on ' + longDay(e.starts_at) + '.\nAre you sure you want to cancel your registration?') + '</div>'
+      + '<div class="modal-actions"><button type="button" class="modal-btn modal-btn-dismiss" id="keep">Never Mind</button>'
+      + '<button type="button" class="modal-btn modal-btn-confirm" id="yesCancel">Yes, Cancel</button></div>', 'keep');
+    $('keep').onclick = closeModal;
     $('yesCancel').onclick = async () => {
-      $('yesCancel').disabled = true; $('keep').disabled = true; $('yesCancel').textContent = 'Cancelling…'; $('yesCancel').classList.add('working');
-      setBusy(true); S.flash = null;
+      closeModal();
+      setBusy(true);
+      const btn = app.querySelector('[data-cancel="' + id + '"]'); if (btn) { btn.textContent = 'CANCELLING…'; btn.classList.add('working'); }
       const r = await gas('mp_cancel', { token: S.token, event_id: id });
-      close();
       if (!r.ok && spmAuth.isAuthErr(r.error)) { setBusy(false); return handleSessionErr(r.error); }
-      S.flash = { at: Date.now(), ok: !!r.ok, text: r.ok ? 'Cancelled. We emailed you a calendar update that removes it.'
-        : r.offline ? 'We lost the connection before we heard back. Below is where things stand now.'
-        : (r.error || 'Something went wrong. Try again.') };
       await showSignedIn(); setBusy(false);
+      if (r.ok) infoModal('Registration Cancelled', fmtLabel(e.format) + ' qualifier on ' + longDay(e.starts_at) + '.\nWe emailed you a calendar update that removes it.');
+      else if (r.offline) infoModal('Connection Lost', 'We lost the connection before we heard back. The page now shows where things stand.');
+      else infoModal('Cancellation Failed', r.error || 'Cancellation failed. Please try again.');
     };
-    $('keep').focus();
   }
-  /* Desktop rail: what you are signed up for (spm-base .spm-rail; hidden below 1200px). */
-  function renderRail() {
-    const rail = $('rail'); if (!rail) return;
-    if (!S.token || !S.me) { rail.innerHTML = ''; return; }
-    const mine = S.events.filter(e => e.my_status === 'registered');
-    rail.innerHTML = '<div class="spm-rail-card"><h3>Your qualifiers</h3>'
-      + (mine.length ? '<dl>' + mine.map(e => '<dt>' + esc(dayText(e.starts_at)) + '</dt><dd>' + fmtLabel(e.format) + ' at ' + esc(e.venue_name || 'TBA') + (e.paid ? ', paid' : '') + '</dd>').join('') + '</dl>'
-                     : '<p class="spm-rail-note">You are not signed up for any yet.</p>')
-      + '<p class="spm-rail-note"><b>Lose a board? Play again.</b> One payment covers every board you play that day.</p></div>';
-  }
+  DESK.addEventListener('change', () => {   /* crossing 1200 px swaps the list for the weekend grid and back */
+    if (S.busy || S.loading || S.offline || $('modal')) return;
+    if (S.token && S.me) render(); else if (!S.token && S.pub) renderPublic();
+  });
 
   /* ── session ── */
-  function handleSessionErr(msg) { spmAuth.clear(); S.token = null; S.me = null; showSignedOut(msg || 'Your session expired. Sign in again.'); }
-  $('logout').onclick = () => { spmAuth.logout(S.token); S.firstName = ''; showSignedOut(); };
+  function handleSessionErr(msg) { spmAuth.clear(); S.token = null; S.me = null; closeModal(); showSignedOut(msg || 'Your session expired. Sign in again.'); }
+  $('logout').onclick = () => { spmAuth.logout(S.token); S.firstName = ''; S.name = ''; closeModal(); showMsg(null); showSignedOut(); };
   /* Sign-in check done HERE, not via spmAuth.boot: boot() clears the shared session on ANY failed check, so one dead
      spot in a bar signed a player out of every SPM app (nemesis player lens). Storage still goes only through
      spmAuth.get / set / clear (the SSO contract); the session is cleared only on a real sign-in error. */
   function boot() {
-    app.innerHTML = '<div class="center"><span class="spin"></span><p class="sub" style="margin-top:12px">Loading the qualifiers…</p></div>';
+    app.innerHTML = '<div class="center"><span class="spin"></span><p style="margin-top:12px">Loading the qualifiers…</p></div>';
     let urlToken = null;
     try { urlToken = new URLSearchParams(location.search).get('token'); if (urlToken) history.replaceState(null, '', location.pathname + (location.hash || '')); } catch (e) {}
     const tok = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(urlToken || '') ? urlToken : spmAuth.get();
     if (!tok) return showSignedOut(urlToken ? 'That link did not work. Request a fresh one.' : '');
     gas('auth_verify', { token: tok }).then(r => {
-      if (r.ok) { spmAuth.set(tok); S.token = tok; S.firstName = r.first_name || ''; return showSignedIn(); }
+      if (r.ok) { spmAuth.set(tok); S.token = tok; S.firstName = r.first_name || ''; S.name = r.name || ''; return showSignedIn(); }
       if (spmAuth.isAuthErr(r.error)) { if (spmAuth.get() === tok) spmAuth.clear(); return showSignedOut(r.error); }
       /* network or server hiccup: keep the session — and a just-tapped link, which the address bar no longer holds —
          so Try again re-checks it instead of forcing a fresh email (nemesis developer 2026-10-23) */
@@ -381,7 +733,7 @@
   let _versionMismatch = false;
   async function checkVersion() {
     try { const r = await fetch(SB_URL + '/rest/v1/apps?app_name=eq.' + APP_NAME + '&select=version', { headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Accept-Profile': 'apa_core' } }); const rows = await r.json(); const v = rows && rows[0] && rows[0].version;
-      if (v && cmpVer(v, window.APP_VERSION) > 0 && !_versionMismatch) { if (S.busy || document.querySelector('.note-back') || document.activeElement === $('ident')) return; _versionMismatch = true; $('updateOverlay').classList.add('show'); pollForDeploy(); } } catch (e) {}
+      if (v && cmpVer(v, window.APP_VERSION) > 0 && !_versionMismatch) { if (S.busy || $('modal') || document.activeElement === $('ident')) return; _versionMismatch = true; $('updateOverlay').classList.add('show'); pollForDeploy(); } } catch (e) {}
   }
   function pollForDeploy() { const t = setInterval(async () => { try { const r = await fetch('version.js?_=' + Date.now(), { cache: 'no-store' }); const m = (await r.text()).match(/APP_VERSION\s*=\s*'([^']+)'/); if (m && cmpVer(m[1], window.APP_VERSION) > 0) { clearInterval(t); location.reload(); } } catch (e) {} }, 15000); }
   setInterval(checkVersion, 30000);
@@ -397,8 +749,8 @@
    (caught by ui-multipass desktop:live, 2026-10-22). */
   var _dataPulse = null, _dataPulseKey = null;   /* a baseline is only a baseline for the key it was taken with */
   const pulseKey = () => S.token && S.me ? S.token : 'index';
-  const pollOk = () => !S.busy && !S.loading && !S.offline && !document.querySelector('.note-back')
-    && !($('ident') && (document.activeElement === $('ident') || $('ident').value));   /* never wipe a half-typed sign-in */
+  const pollOk = () => !S.busy && !S.loading && !S.offline && !$('modal')
+    && !($('ident') && !$('signin').hidden && (document.activeElement === $('ident') || $('ident').value));   /* never wipe a half-typed sign-in */
   async function fetchDataPulse(forKey) {
     const key = forKey || pulseKey();
     try {
