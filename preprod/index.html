@@ -1,20 +1,25 @@
 <!DOCTYPE html>
 <!--
-  MultiPass — South Portland Metro APA · singles-qualifier sign-up (v1.1, rebuilt 2026-10-22, legacy look 2026-10-23)
+  MultiPass — South Portland Metro APA · singles-qualifier sign-up (v1.2, rebuilt 2026-10-22, legacy look 2026-10-23)
   ─────────────────────────────────────────────────────────────────────────────
   Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md (Spiral, High). Guards: tools/claude/validate-multipass.mjs
-        (static pins) + tools/claude/appcheck/ui-multipass.mjs (headless, 4 viewports).
+        (static pins + formatStatus unit tests) + tools/claude/appcheck/ui-multipass.mjs (headless, 4 viewports).
   LOOK  the LEGACY MultiPass layout, on the operator's call ("the multipass ui doesnt look like the old one... update this
-        one to match", 2026-10-23): gradient header with the italic MultiPass name + SINGLES QUALIFIER REGISTRATION pill,
-        compact pill sign-in bar, welcome pill, Your Registrations panel, AVAILABLE QUALIFIERS divider, "Questions? Hit Us
-        Up" banner, yellow 10-scores note, centred date-first cards (solid red 8-Ball / blue 9-Ball pills, 3D gradient
-        buttons, left-border tint by eligibility), desktop SATURDAY / SUNDAY grid. Source of truth for the look: the legacy
-        root index.html (git da556c1). Deliberate differences, each for a reason:
+        one to match" and "the old mulipass ui had ui specific to tablet, computer and phone... replicate", 2026-10-23):
+        gradient header with the italic MultiPass name + SINGLES QUALIFIER REGISTRATION pill, compact pill sign-in bar,
+        welcome pill, Your Registrations panel, AVAILABLE QUALIFIERS divider, "Questions? Hit Us Up" banner, yellow
+        10-scores note, centred date-first cards (solid red 8-Ball / blue 9-Ball pills, 3D gradient buttons, left-border
+        tint by eligibility), desktop SATURDAY / SUNDAY grid. Source of truth for the look: the legacy root index.html
+        (git da556c1). Per-device layouts use the legacy rule (spmDevice below): phone / tablet / desktop by the DEVICE's
+        screen width, a wide touch screen stays a tablet. Deliberate differences, each for a reason:
           · the legacy page drew phones at 36 px and shrank the whole page with transform: scale(0.44) — that put its
-            modal 470 px down the page. Here the same sizes are drawn directly (--k = 0.44 below 768 px, 1 above).
+            modal 470 px down the page. Here the same sizes are drawn directly (--k = 0.44 on phones, 1 otherwise).
+          · a window too narrow for its device's layout steps down a class (the legacy page overflowed sideways).
           · the sign-in bar emails a link (shared SSO), it does not look anyone up; it hides once you are signed in.
-          · tap targets are at least 40 px (house check), muted text is #767676 (legacy #888 fails contrast).
-          · fee line, eligibility per format, "how it works", and a contact route in every dead end (legacy had none).
+          · tap targets are at least 40 px (house check); muted text is #666 and closed / signed-out cards are not faded
+            with opacity (legacy #888 and the 0.55-0.65 fades measured 2.3-3:1 contrast, nemesis ui lens).
+          · fee line, per-format exception banners, "how it works", truthful email lines, and a contact route in every
+            dead end (legacy had none).
           · the weekend grid works out dates from the event itself (legacy hard-coded 2026).
   WHO   anyone can SEE the open qualifiers (anon read of multipass.events; RLS shows only enabled, non-test rows).
         A signed-in member (shared sign-in, spm-auth.js — one session across every SPM app) registers or cancels
@@ -24,17 +29,19 @@
         mp_context · mp_register · mp_cancel (+ auth_* via spm-auth.js). The server takes identity from the
         session, never from this page, and re-checks every rule; this page only explains what it says.
         Direct Supabase reads: multipass.events (anon, public schedule), apa_core.apps (updater), apa_core.app_pulse.
-  MAIL  confirmation + cancellation, each with a calendar invite (REQUEST / CANCEL), from the server.
+  MAIL  confirmation + cancellation, each with a calendar invite (REQUEST / CANCEL), from the server. The page says what
+        the server reports (email: sent / blocked / failed), never assumes it went.
   Brand: the palette is inlined (--spm-primary / --spm-accent, PatchCheck-style; validate-ui-brand accepts either).
   Auto-updater: apa_core.apps row "MultiPass" / "MultiPass-preprod" → version.js (serve-then-bump).
-  Preprod: same file; IS_PREPROD from the URL; asks the server for is_test fixture events (testers only).
+  Preprod: same file; IS_PREPROD from the URL; asks the server for is_test fixture events (testers only). The emailed
+        sign-in link always lands on the PRODUCTION page (AUTH_APPS.multipass.url); test preprod signed in via SSO.
   Copy rule: no em-dashes in anything a player reads.
   Replaces the legacy GAS + Sheets MultiPass (no sign-in, stale eligibility) at the same URL.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>MultiPass · South Portland Metro APA</title>
 <meta name="description" content="Sign up for South Portland Metro APA singles qualifiers.">
@@ -45,10 +52,28 @@
 <link rel="icon" type="image/svg+xml" href="https://southportlandmetroapa.github.io/multipass/favicon.svg">
 <script src="version.js"></script>
 <script src="https://southportlandmetroapa.github.io/shared/spm-auth.js"></script>
+<script>
+  /* Legacy device classes (the GAS Responsive UI Standard the old page used): by the DEVICE's screen width — phone under
+     768, tablet under 1200, and a wide touch screen without a fine pointer stays a tablet. Two guards the legacy page
+     lacked: the device is at least as wide as the window (emulators report screen.width 0), and a window too narrow for
+     its device's layout steps down a class instead of overflowing. html.dev-t carries the tablet AND desktop rules,
+     html.dev-d the desktop rules. Runs in <head>, before the first paint. */
+  function spmDevice() {
+    var vw = window.innerWidth, sw = Math.max(screen.width || 0, vw);
+    var c = sw < 768 ? 'phone' : sw < 1200 ? 'tablet'
+          : (navigator.maxTouchPoints > 0 && !window.matchMedia('(pointer: fine)').matches) ? 'tablet' : 'desktop';
+    if (c === 'desktop' && vw < 760) c = 'tablet';
+    if (c === 'tablet' && vw < 640) c = 'phone';
+    var h = document.documentElement;
+    h.classList.toggle('dev-t', c !== 'phone'); h.classList.toggle('dev-d', c === 'desktop');
+    return c;
+  }
+  spmDevice();
+</script>
 <style>
   :root{
     --spm-primary:#ea002a; --spm-accent:#0031a1;
-    --bg:#f5f5f5; --card:#fff; --border:#e1e1e1; --text:#1f1f1f; --muted:#767676;
+    --bg:#f5f5f5; --card:#fff; --border:#e1e1e1; --text:#1f1f1f; --muted:#666;
     --registered-bg:#f0faf3; --registered-border:#28a745;
     --warning-bg:#fff3cd; --warning-border:#ffc107; --warning-text:#856404;
     --grad:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));
@@ -112,9 +137,10 @@
   .error-content li{ margin-bottom:6px; }
   .not-found-card, .info-card{ background:var(--card); border-radius:calc(22px*var(--k)); padding:calc(22px*var(--k)) calc(20px*var(--k)); box-shadow:0 calc(3px*var(--k)) calc(10px*var(--k)) rgba(0,0,0,.12);
     border:1px solid var(--border); margin-bottom:calc(18px*var(--k)); text-align:center; font-size:1.15rem; line-height:1.5; }
-  .not-found-card p, .info-card p{ margin-bottom:14px; }
+  .not-found-card p{ margin-bottom:14px; }
   .info-card{ text-align:left; font-size:1.05rem; }
-  .info-card ul{ padding-left:20px; } .info-card li{ margin-bottom:6px; }
+  .info-card summary{ padding:10px 0; font-weight:700; cursor:pointer; }
+  .info-card ul{ padding-left:20px; margin-top:6px; } .info-card li{ margin-bottom:6px; }
   .contact-btn{ display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:calc(14px*var(--k)) calc(10px*var(--k)); width:100%; font-size:1.05rem; font-weight:800; color:#fff; text-decoration:none;
     border-radius:calc(22px*var(--k)); background:var(--grad); box-shadow:0 4px 14px rgba(0,0,0,.2); line-height:1.3; text-align:center; }
   .contact-wrap{ text-align:center; margin-bottom:calc(14px*var(--k)); }
@@ -128,12 +154,12 @@
   .qual-card{ background:var(--card); border-radius:calc(22px*var(--k)); padding:calc(20px*var(--k)); box-shadow:0 calc(3px*var(--k)) calc(10px*var(--k)) rgba(0,0,0,.12);
     border:1px solid var(--border); margin-bottom:calc(18px*var(--k)); text-align:center; transition:background .3s, border-color .3s, box-shadow .3s; }
   .qual-card.anim{ animation:slideDown .3s ease-out; }
+  /* closed: the legacy page faded the whole card; a grey card keeps the look without fading the text. Before the
+     registered tints, so a registered-but-closed card keeps its eligibility colour. */
+  .qual-card.card-closed{ background:#f2f2f2; box-shadow:none; }
   .qual-card.card-registered{ border-left:calc(6px*var(--k)) solid #ffc107; background:#fffbeb; }
   .qual-card.card-registered.card-elig-confirmed{ border-left-color:var(--registered-border); background:var(--registered-bg); }
   .qual-card.card-registered.card-elig-ineligible{ border-left-color:#dc3545; background:#fdf0f1; }
-  .qual-card.card-closed{ opacity:.65; }
-  .qual-card.card-closed.card-registered{ opacity:.82; }
-  .qual-card.card-disabled{ opacity:.7; }
   .qual-card.flash{ box-shadow:0 0 0 4px rgba(0,49,161,.4); }
   .qual-date{ font-size:1.5rem; font-weight:800; margin-bottom:calc(8px*var(--k)); }
   .badges{ margin-bottom:calc(10px*var(--k)); }
@@ -142,13 +168,13 @@
   .format-9{ background:var(--spm-accent); }
   .format-badge.test-badge{ background:#fff3cd; color:#7a5a00; margin-left:6px; }
   .qual-time{ font-size:1.25rem; color:var(--muted); margin-bottom:calc(4px*var(--k)); }
-  .qual-location{ display:inline-flex; align-items:center; justify-content:center; min-height:40px; font-size:1.35rem; margin-bottom:calc(6px*var(--k)); font-weight:600;
+  .nw{ white-space:nowrap; }
+  .qual-location{ display:inline-flex; align-items:center; justify-content:center; min-height:44px; font-size:1.35rem; margin-bottom:calc(6px*var(--k)); font-weight:600;
     color:var(--spm-accent); text-decoration:underline; text-decoration-color:rgba(0,49,161,.3); text-underline-offset:2px; }
   .qual-location:visited{ color:var(--spm-accent); }
   .qual-location.tba{ color:var(--muted); text-decoration:none; }
   .qual-fee{ font-size:1.05rem; color:var(--muted); margin-bottom:calc(14px*var(--k)); }
   .qual-fee.paid{ color:#155724; font-weight:700; }
-  .nw{ white-space:nowrap; }
   .elig-badge{ display:block; width:90%; margin:0 auto calc(10px*var(--k)); font-size:.92rem; font-weight:700; padding:calc(8px*var(--k)) calc(14px*var(--k)); border-radius:calc(12px*var(--k));
     letter-spacing:.04em; text-align:center; }
   .elig-pending{ background:#fff3cd; color:#856404; border:1px solid #ffc107; }
@@ -170,9 +196,9 @@
   .register-btn.btn-cancel{ background:var(--gloss),var(--spm-primary); box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 4px 10px rgba(234,0,42,.35); }
   .register-btn.btn-cancel-9{ background:var(--gloss),var(--spm-accent); box-shadow:inset 0 1px 1px rgba(255,255,255,.35),0 4px 10px rgba(0,49,161,.35); }
   .register-btn.btn-closed{ background:#999; border-bottom:none; box-shadow:none; text-shadow:none; cursor:not-allowed; }
-  .register-btn.btn-closed-cancel{ background:linear-gradient(180deg,rgba(255,255,255,.18) 0%,rgba(0,0,0,.08) 100%),#777; border-bottom:2px solid rgba(0,0,0,.2);
+  .register-btn.btn-closed-cancel{ background:linear-gradient(180deg,rgba(255,255,255,.18) 0%,rgba(0,0,0,.08) 100%),#5c5c5c; border-bottom:2px solid rgba(0,0,0,.2);
     box-shadow:inset 0 1px 1px rgba(255,255,255,.2),0 2px 6px rgba(0,0,0,.2); line-height:1.4; }
-  .register-btn.btn-signin-required{ background:#8a8a8a; border-bottom:2px solid rgba(0,0,0,.15); box-shadow:none; text-shadow:none; font-size:1.1rem; }
+  .register-btn.btn-signin-required{ background:#5f5f5f; border-bottom:2px solid rgba(0,0,0,.15); box-shadow:none; text-shadow:none; font-size:1.1rem; }
 
   /* Your Registrations */
   .reg-summary{ margin-bottom:calc(18px*var(--k)); border-radius:calc(22px*var(--k)); overflow:hidden; background:rgba(0,49,161,.04); border:1px solid rgba(0,49,161,.18);
@@ -227,104 +253,100 @@
   #updateOverlay{ position:fixed; inset:0; background:rgba(255,255,255,.96); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:12px; text-align:center; padding:24px; }
   #updateOverlay.show{ display:flex; }
 
-  /* ── tablet (legacy body.tablet: 20 px base, 620 px column, no divider, summary always open) ── */
-  @media (min-width:768px){
-    :root{ --k:1; }
-    html{ font-size:20px; }
-    html, body{ background:#e8e8e8; }
-    .page{ max-width:620px; margin:0 auto; padding:16px; }
-    .title{ font-size:36px; } .subtitle{ font-size:40px; }
-    .beta-pill{ display:inline-block; width:auto; font-size:20px; padding:6px 28px; letter-spacing:.12em; }
-    .header-status{ font-size:26px; }
-    header{ border-radius:16px; }
-    .login-bar{ padding:8px 12px; gap:8px; }
-    .login-input{ font-size:16px; padding:10px 14px; }
-    .login-btn{ font-size:15px; padding:10px 18px; }
-    .login-hint{ font-size:14px; }
-    .welcome-pill{ font-size:20px; padding:6px 18px; }
-    .link-btn{ font-size:15px; }
-    .qual-card{ border-radius:16px; padding:16px; }
-    .qual-date{ font-size:22px; }
-    .format-badge{ font-size:16px; padding:3px 14px; }
-    .qual-time{ font-size:18px; } .qual-location{ font-size:20px; } .qual-fee{ font-size:16px; }
-    .elig-badge{ font-size:14px; padding:6px 12px; border-radius:10px; }
-    .card-note, .card-after{ font-size:15px; }
-    .register-btn{ font-size:18px; padding:12px 36px; }
-    .msg{ font-size:16px; border-radius:16px; }
-    .ineligible-banner, .status-banner, .not-found-card, .info-card{ font-size:16px; border-radius:16px; }
-    .contact-btn{ font-size:15px; border-radius:16px; }
-    .contact-banner{ font-size:30px; padding:22px 10px; border-radius:16px; }
-    .reg-summary{ border-radius:16px; }
-    .reg-summary-icon{ width:28px; height:28px; font-size:14px; }
-    .reg-summary-title{ font-size:20px; }
-    .reg-summary-count{ min-width:24px; height:24px; font-size:14px; padding:0 6px; }
-    .reg-summary-chevron{ display:none; }
-    .reg-summary-format{ font-size:15px; padding:3px 12px; }
-    .reg-summary-date{ font-size:18px; } .reg-summary-location{ font-size:15px; }
-    .reg-summary-item{ border-radius:12px; padding:8px 12px; }
-    .reg-summary .reg-summary-body{ max-height:900px; visibility:visible; border-top:1px solid rgba(0,49,161,.12); }
-    .section-divider{ display:none !important; }
-    .eligibility-note{ font-size:14px; margin-bottom:10px; padding:10px 14px; border-radius:10px; }
-    .modal-panel{ border-radius:16px; padding:24px 20px 20px; }
-    .modal-title{ font-size:20px; } .modal-message{ font-size:16px; } .modal-btn{ font-size:16px; padding:12px 0; }
-    footer{ font-size:13px; }
-  }
+  /* ── tablet (legacy body.tablet: 20 px base, 620 px column, no divider, summary always open). html.dev-t is set by
+     spmDevice() for tablets AND desktops; the desktop block below overrides it. ── */
+  html.dev-t{ --k:1; font-size:20px; }
+  html.dev-t, html.dev-t body{ background:#e8e8e8; }
+  html.dev-t .page{ max-width:620px; margin:0 auto; padding:16px; }
+  html.dev-t .title{ font-size:36px; } html.dev-t .subtitle{ font-size:40px; }
+  html.dev-t .beta-pill{ display:inline-block; width:auto; font-size:20px; padding:6px 28px; letter-spacing:.12em; }
+  html.dev-t .header-status{ font-size:26px; }
+  html.dev-t header{ border-radius:16px; }
+  html.dev-t .login-bar{ padding:8px 12px; gap:8px; }
+  html.dev-t .login-input{ font-size:16px; padding:10px 14px; }
+  html.dev-t .login-btn{ font-size:15px; padding:10px 18px; }
+  html.dev-t .login-hint{ font-size:14px; }
+  html.dev-t .welcome-pill{ font-size:20px; padding:6px 18px; }
+  html.dev-t .link-btn{ font-size:15px; }
+  html.dev-t .qual-card{ border-radius:16px; padding:16px; }
+  html.dev-t .qual-date{ font-size:22px; }
+  html.dev-t .format-badge{ font-size:16px; padding:3px 14px; }
+  html.dev-t .qual-time{ font-size:18px; } html.dev-t .qual-location{ font-size:20px; } html.dev-t .qual-fee{ font-size:16px; }
+  html.dev-t .elig-badge{ font-size:14px; padding:6px 12px; border-radius:10px; }
+  html.dev-t .card-note, html.dev-t .card-after{ font-size:15px; }
+  html.dev-t .register-btn{ font-size:18px; padding:12px 36px; }
+  html.dev-t .msg{ font-size:16px; border-radius:16px; }
+  html.dev-t .ineligible-banner, html.dev-t .status-banner, html.dev-t .not-found-card, html.dev-t .info-card{ font-size:16px; border-radius:16px; }
+  html.dev-t .contact-btn{ font-size:15px; border-radius:16px; }
+  html.dev-t .contact-banner{ font-size:30px; padding:22px 10px; border-radius:16px; }
+  html.dev-t .reg-summary{ border-radius:16px; }
+  html.dev-t .reg-summary-icon{ width:28px; height:28px; font-size:14px; }
+  html.dev-t .reg-summary-title{ font-size:20px; }
+  html.dev-t .reg-summary-count{ min-width:24px; height:24px; font-size:14px; padding:0 6px; }
+  html.dev-t .reg-summary-chevron{ display:none; }
+  html.dev-t .reg-summary-format{ font-size:15px; padding:3px 12px; }
+  html.dev-t .reg-summary-date{ font-size:18px; } html.dev-t .reg-summary-location{ font-size:15px; }
+  html.dev-t .reg-summary-item{ border-radius:12px; padding:8px 12px; }
+  html.dev-t .reg-summary .reg-summary-body{ max-height:900px; visibility:visible; border-top:1px solid rgba(0,49,161,.12); }
+  html.dev-t .section-divider{ display:none !important; }
+  html.dev-t .eligibility-note{ font-size:14px; margin-bottom:10px; padding:10px 14px; border-radius:10px; }
+  html.dev-t .modal-panel{ border-radius:16px; padding:24px 20px 20px; }
+  html.dev-t .modal-title{ font-size:20px; } html.dev-t .modal-message{ font-size:16px; } html.dev-t .modal-btn{ font-size:16px; padding:12px 0; }
+  html.dev-t footer{ font-size:13px; }
 
   /* ── desktop (legacy body.desktop: 14 px base, 900 px, SATURDAY / SUNDAY grid, row cards, no summary) ── */
-  @media (min-width:1200px){
-    html{ font-size:14px; }
-    .page{ max-width:900px; padding:16px 24px; }
-    header{ padding:18px 24px 14px; margin-bottom:12px; border-radius:12px; box-shadow:0 3px 12px rgba(0,0,0,.2); }
-    .title{ font-size:42px; line-height:1.1; } .subtitle{ font-size:48px; }
-    .subtitle-group{ margin-top:6px; }
-    .beta-pill{ margin-top:8px; }
-    .header-status{ display:none; }
-    .login-bar{ max-width:500px; padding:6px 10px; gap:8px; margin-bottom:10px; }
-    .login-input{ font-size:14px; padding:8px 14px; min-height:40px; }
-    .login-btn{ font-size:13px; padding:8px 16px; letter-spacing:.06em; min-height:40px; }
-    .login-hint{ font-size:12px; margin-top:-4px; }
-    .welcome-pill{ font-size:28px; padding:6px 24px; margin:10px auto 2px; }
-    .link-btn{ font-size:13px; }
-    .eligibility-note{ font-size:12px; margin-bottom:8px; padding:8px 12px; border-radius:8px; }
-    .reg-summary{ display:none !important; }
-    .msg{ font-size:13px; border-radius:8px; padding:10px 14px; margin-bottom:10px; }
-    .ineligible-banner, .status-banner{ font-size:13px; border-radius:8px; padding:10px 14px; margin-bottom:10px; }
-    .not-found-card{ font-size:13px; border-radius:8px; padding:14px; max-width:420px; margin:0 auto 10px; }
-    .info-card{ font-size:13px; border-radius:8px; padding:14px; margin-top:12px; }
-    .contact-btn{ font-size:12px; border-radius:6px; max-width:200px; margin:0 auto; display:flex; padding:8px; min-height:40px; }
-    .contact-banner{ font-size:18px; padding:14px 10px; border-radius:10px; max-width:400px; margin:0 auto; }
-    .modal-panel{ border-radius:12px; padding:18px 20px 16px; max-width:380px; }
-    .modal-title{ font-size:15px; } .modal-message{ font-size:13px; margin-bottom:14px; } .modal-btn{ font-size:13px; padding:8px 0; min-height:40px; }
-    footer{ font-size:11px; margin-top:12px; }
-
-    #cards.grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-    .grid-col-header{ font-size:15px; font-weight:800; color:#555; text-align:center; text-transform:uppercase; letter-spacing:.12em; padding:0 0 4px; }
-    .day-cell{ display:flex; flex-direction:column; gap:10px; }
-    .day-wide{ grid-column:1 / -1; }
-    #cards .qual-card{ border-radius:10px; padding:10px; margin-bottom:0; box-shadow:0 2px 6px rgba(0,0,0,.1);
-      display:grid; grid-template-columns:76px 1fr 160px; align-items:center; transition:transform .15s ease, box-shadow .15s ease; }
-    #cards:not(.grid) .qual-card{ margin-bottom:10px; }
-    #cards .qual-card:hover:not(.card-empty){ transform:translateY(-2px); box-shadow:0 6px 20px rgba(0,0,0,.15); }
-    .qual-card .badges{ grid-column:1; grid-row:1 / span 7; display:flex; flex-direction:column; align-items:center; gap:4px; margin:0; }
-    .format-badge{ font-size:14px; padding:5px 12px; }
-    .format-badge.test-badge{ margin-left:0; }
-    .qual-card > .register-btn{ grid-column:3; grid-row:1 / span 7; align-self:center; justify-self:center; font-size:15px; padding:7px 14px; margin:0; min-height:40px; }
-    .qual-card > .qual-date, .qual-card > .qual-location, .qual-card > .qual-time, .qual-card > .qual-fee,
-    .qual-card > .elig-badge, .qual-card > .card-note, .qual-card > .card-after{ grid-column:2; }
-    .qual-date{ font-size:19px; margin-bottom:1px; order:0; }
-    .qual-location{ font-size:15px; margin:0; order:1; text-decoration-color:rgba(0,49,161,.25); }
-    .qual-time{ font-size:14px; margin:0; order:2; }
-    .qual-fee{ font-size:13px; margin:0; order:3; }
-    .elig-badge{ font-size:11px; padding:4px 10px; margin:4px 0 0; justify-self:stretch; width:auto; border-radius:8px; order:4; }
-    .card-note{ font-size:12px; margin:4px 0 0; width:auto; order:5; }
-    .card-after{ font-size:12px; margin:4px 0 0; order:6; }
-    .qual-card.card-closed{ opacity:.75; } .qual-card.card-closed.card-registered{ opacity:.88; }
-    #cards .qual-card.card-empty{ display:flex; flex-direction:column; justify-content:center; align-items:center; background:transparent; border:1px dashed #bbb; box-shadow:none; min-height:60px; }
-    .empty-day{ font-size:13px; font-weight:700; color:#777; }
-    .empty-msg{ font-size:11px; color:#888; font-style:italic; margin-top:2px; }
-    .register-btn:hover:not(:disabled), .login-btn:hover:not(:disabled){ filter:brightness(1.08); }
-    .modal-btn:hover{ filter:brightness(1.06); }
-  }
+  html.dev-d{ font-size:14px; }
+  html.dev-d .page{ max-width:900px; padding:16px 24px; }
+  html.dev-d header{ padding:18px 24px 14px; margin-bottom:12px; border-radius:12px; box-shadow:0 3px 12px rgba(0,0,0,.2); }
+  html.dev-d .title{ font-size:42px; line-height:1.1; } html.dev-d .subtitle{ font-size:48px; }
+  html.dev-d .subtitle-group{ margin-top:6px; }
+  html.dev-d .beta-pill{ margin-top:8px; }
+  html.dev-d .header-status{ display:none; }
+  html.dev-d .login-bar{ max-width:500px; padding:6px 10px; gap:8px; margin-bottom:10px; }
+  html.dev-d .login-input{ font-size:14px; padding:8px 14px; min-height:40px; }
+  html.dev-d .login-btn{ font-size:13px; padding:8px 16px; letter-spacing:.06em; min-height:40px; }
+  html.dev-d .login-hint{ font-size:12px; margin-top:-4px; }
+  html.dev-d .welcome-pill{ font-size:28px; padding:6px 24px; margin:10px auto 2px; }
+  html.dev-d .link-btn{ font-size:13px; }
+  html.dev-d .eligibility-note{ font-size:12px; margin-bottom:8px; padding:8px 12px; border-radius:8px; }
+  html.dev-d .reg-summary{ display:none !important; }
+  html.dev-d .msg{ font-size:13px; border-radius:8px; padding:10px 14px; margin-bottom:10px; }
+  html.dev-d .ineligible-banner, html.dev-d .status-banner{ font-size:13px; border-radius:8px; padding:10px 14px; margin-bottom:10px; }
+  html.dev-d .not-found-card{ font-size:13px; border-radius:8px; padding:14px; max-width:420px; margin:0 auto 10px; }
+  html.dev-d .info-card{ font-size:13px; border-radius:8px; padding:4px 14px; margin-top:12px; }
+  html.dev-d .info-card summary{ padding:11px 0; }
+  html.dev-d .contact-btn{ font-size:12px; border-radius:6px; max-width:200px; margin:0 auto; display:flex; padding:8px; min-height:40px; }
+  html.dev-d .contact-banner{ font-size:18px; padding:14px 10px; border-radius:10px; max-width:400px; margin:0 auto; }
+  html.dev-d .modal-panel{ border-radius:12px; padding:18px 20px 16px; max-width:380px; }
+  html.dev-d .modal-title{ font-size:15px; } html.dev-d .modal-message{ font-size:13px; margin-bottom:14px; } html.dev-d .modal-btn{ font-size:13px; padding:8px 0; min-height:40px; }
+  html.dev-d footer{ font-size:11px; margin-top:12px; }
+  html.dev-d #cards.grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  html.dev-d .grid-col-header{ font-size:15px; font-weight:800; color:#555; text-align:center; text-transform:uppercase; letter-spacing:.12em; padding:0 0 4px; }
+  html.dev-d .day-cell{ display:flex; flex-direction:column; gap:10px; }
+  html.dev-d .day-wide{ grid-column:1 / -1; }
+  html.dev-d #cards .qual-card{ border-radius:10px; padding:10px; margin-bottom:0; box-shadow:0 2px 6px rgba(0,0,0,.1);
+    display:grid; grid-template-columns:76px 1fr 160px; align-items:center; transition:transform .15s ease, box-shadow .15s ease; }
+  html.dev-d #cards .qual-card.card-closed{ box-shadow:none; }
+  html.dev-d #cards:not(.grid) .qual-card{ margin-bottom:10px; }
+  html.dev-d #cards .qual-card:hover:not(.card-empty){ transform:translateY(-2px); box-shadow:0 6px 20px rgba(0,0,0,.15); }
+  html.dev-d .qual-card .badges{ grid-column:1; grid-row:1 / span 7; display:flex; flex-direction:column; align-items:center; gap:4px; margin:0; }
+  html.dev-d .format-badge{ font-size:14px; padding:5px 12px; }
+  html.dev-d .format-badge.test-badge{ margin-left:0; }
+  html.dev-d .qual-card > .register-btn{ grid-column:3; grid-row:1 / span 7; align-self:center; justify-self:center; font-size:15px; padding:7px 14px; margin:0; min-height:40px; }
+  html.dev-d .qual-card > .qual-date, html.dev-d .qual-card > .qual-location, html.dev-d .qual-card > .qual-time, html.dev-d .qual-card > .qual-fee,
+  html.dev-d .qual-card > .elig-badge, html.dev-d .qual-card > .card-note, html.dev-d .qual-card > .card-after{ grid-column:2; }
+  html.dev-d .qual-date{ font-size:19px; margin-bottom:1px; order:0; }
+  html.dev-d .qual-location{ font-size:15px; margin:0; order:1; min-height:42px; text-decoration-color:rgba(0,49,161,.25); }
+  html.dev-d .qual-time{ font-size:14px; margin:0; order:2; }
+  html.dev-d .qual-fee{ font-size:13px; margin:0; order:3; }
+  html.dev-d .elig-badge{ font-size:11px; padding:4px 10px; margin:4px 0 0; justify-self:stretch; width:auto; border-radius:8px; order:4; }
+  html.dev-d .card-note{ font-size:12px; margin:4px 0 0; width:auto; order:5; }
+  html.dev-d .card-after{ font-size:12px; margin:4px 0 0; order:6; }
+  html.dev-d #cards .qual-card.card-empty{ display:flex; flex-direction:column; justify-content:center; align-items:center; background:transparent; border:1px dashed #999; box-shadow:none; min-height:60px; }
+  html.dev-d .empty-day{ font-size:13px; font-weight:700; color:#555; }
+  html.dev-d .empty-msg{ font-size:11px; color:#555; font-style:italic; margin-top:2px; }
+  html.dev-d .register-btn:hover:not(:disabled), html.dev-d .login-btn:hover:not(:disabled){ filter:brightness(1.08); }
+  html.dev-d .modal-btn:hover{ filter:brightness(1.06); }
 </style>
 </head>
 <body>
@@ -348,9 +370,11 @@
       <button id="send" class="login-btn" type="submit">SIGN IN</button>
     </form>
     <p class="login-hint" id="signinHint" hidden>We email you a sign-in link. No password needed.</p>
+    <!-- shown ONLY when the server could not find the email or number (legacy: !data.found). Other failures (too many
+         tries, no email on file, No-Contact list, no signal) say their own reason in #msg. -->
     <div class="not-found-card" id="notFound" hidden>
       <div class="error-content">
-        <p><strong>Having trouble signing in?</strong></p>
+        <p><strong>We could not find an account matching that.</strong></p>
         <ul>
           <li><strong>Used your email?</strong> We may have a different email on file. Try your APA member number instead.</li>
           <li><strong>Used your APA #?</strong> Double-check the number. It is on your APA membership card.</li>
@@ -393,9 +417,10 @@
   };
   /* The league's contact page: the legacy "Questions? Hit Us Up" target, reachable from every dead end. */
   const CONTACT_URL = 'https://linktr.ee/spmContactUs';
-  const S = { token: null, firstName: '', name: '', me: null, events: [], pub: [], maintenance: false, busy: false, loading: false, offline: false, regOpen: true, painted: false };
+  const S = { token: null, firstName: '', name: '', me: null, events: [], pub: null, maintenance: false, busy: false, loading: false, offline: false,
+              regOpen: true, painted: false, dirty: false };
   const app = $('app');
-  const DESK = matchMedia('(min-width:1200px)');   /* the legacy desktop layout: SATURDAY / SUNDAY grid */
+  const isDesk = () => document.documentElement.classList.contains('dev-d');   /* set by spmDevice() in <head>; the CSS keys on the same class */
   $('verLabel').textContent = window.APP_VERSION + (IS_PREPROD ? ' preprod' : '');
   if (IS_PREPROD) {
     const bar = document.createElement('div');
@@ -422,6 +447,8 @@
   const mapUrl = e => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([e.venue_name, e.venue_address].filter(Boolean).join(', '));
   /* An event is over once its last boards have started plus a little play time (or 9 h after the start). */
   const isOver = e => Date.now() > (e.last_board_at ? Date.parse(e.last_board_at) + 2 * 3600e3 : Date.parse(e.starts_at) + 9 * 3600e3);
+  /* online registration closes at the cutoff, or at the start (mpIsOpen_ on the server); re-checked every minute below */
+  const closesAt = e => Date.parse(e.cutoff_at || e.starts_at);
 
   /* ── page pieces ── */
   function setStatus(n) { $('statusText').textContent = n ? n + ' qualifier' + (n === 1 ? '' : 's') + ' available' : ''; }
@@ -439,12 +466,12 @@
     return '<div class="contact-wrap"><a class="contact-banner" href="' + CONTACT_URL + '" target="_blank" rel="noopener">Questions? Hit Us Up</a></div>';
   }
   function howItWorks() {
-    return '<div class="info-card how"><p><strong>How a Play Til You Win qualifier works</strong></p><ul>'
+    return '<details class="info-card how"><summary>How a Play Til You Win qualifier works</summary><ul>'
       + '<li><b>Four-player boards, single elimination.</b> Win your board and you qualify for the Singles Regionals.</li>'
       + '<li><b>Lose and play again.</b> Enter another board for free, until you qualify or decide you are done.</li>'
       + '<li><b>One payment covers the day.</b> Pay at the door, cash or Venmo. A new day is a new entry fee.</li>'
       + '<li><b>Who can play:</b> APA members 18 and over, on an active team in that format, with at least 10 league match scores in that format in the last two years.</li>'
-      + '<li><b>Walk-ins are welcome.</b> Signing up here just helps us plan boards.</li></ul></div>';
+      + '<li><b>Walk-ins are welcome.</b> Signing up here just helps us plan boards.</li></ul></details>';
   }
   function showOffline(retry) {
     S.offline = true;   /* the live poll stands down: there is no fresh view to compare against */
@@ -458,21 +485,23 @@
      inCol = the desktop SATURDAY / SUNDAY column already names the weekday. */
   function cardHtml(e, signedIn, inCol) {
     const reg = signedIn && e.my_status === 'registered';
-    const started = Date.now() >= Date.parse(e.starts_at);            /* the server stops cancels at the start */
-    const closed = signedIn ? !e.open : Date.now() >= Date.parse(e.cutoff_at || e.starts_at);
+    const now = Date.now();
+    const started = now >= Date.parse(e.starts_at);                  /* the server stops cancels at the start */
+    const closed = now >= closesAt(e) || (signedIn && !e.open);
+    const paused = signedIn && S.maintenance;                         /* the server refuses every register AND cancel */
     const blocked = signedIn && !reg && !closed && !e.can_register;  /* not on a team, marked ineligible, qualified, paused */
     const el = e.eligibility === 'eligible' ? ['confirmed', 'elig-eligible', 'Eligibility Confirmed']
              : e.eligibility === 'ineligible' ? ['ineligible', 'elig-ineligible', 'Not Eligible'] : ['pending', 'elig-pending', 'Eligibility Pending'];
-    const cls = 'qual-card' + (reg ? ' card-registered card-elig-' + el[0] : '') + (closed ? ' card-closed' : '')
-      + (!signedIn || blocked ? ' card-disabled' : '') + (S.painted ? '' : ' anim');
+    const cls = 'qual-card' + (reg ? ' card-registered card-elig-' + el[0] : '') + (closed ? ' card-closed' : '') + (S.painted ? '' : ' anim');
     const cost = money(Number(e.entry_fee) + Number(e.greens_fee));
     const where = e.venue_name ? '<a class="qual-location" href="' + mapUrl(e) + '" target="_blank" rel="noopener" title="' + esc(e.venue_address || 'Directions') + '">' + esc(e.venue_name) + '</a>'
       : '<div class="qual-location tba">Venue to be announced</div>';
+    const cancelAttr = paused ? ' disabled' : ' data-cancel="' + e.id + '"';
     let btn, note = '', after = '';
     if (!signedIn) btn = closed ? '<button type="button" class="register-btn btn-closed" disabled>Closed</button>'
       : '<button type="button" class="register-btn btn-signin-required" data-signin>Sign In to Register</button>';
-    else if (reg && !closed) btn = '<button type="button" class="register-btn btn-cancel' + (e.format === '9' ? ' btn-cancel-9' : '') + '" data-cancel="' + e.id + '">Cancel</button>';
-    else if (reg && !started) btn = '<button type="button" class="register-btn btn-closed-cancel" data-cancel="' + e.id + '">Closed · Cancel</button>';
+    else if (reg && !closed) btn = '<button type="button" class="register-btn btn-cancel' + (e.format === '9' ? ' btn-cancel-9' : '') + '"' + cancelAttr + '>Cancel</button>';
+    else if (reg && !started) btn = '<button type="button" class="register-btn btn-closed-cancel"' + cancelAttr + '>Closed · Cancel</button>';
     else if (closed) btn = '<button type="button" class="register-btn btn-closed" disabled>Closed</button>';
     else if (e.can_register) btn = '<button type="button" class="register-btn" data-reg="' + e.id + '">Register</button>';
     else btn = '<button type="button" class="register-btn" disabled>Register</button>';
@@ -490,9 +519,10 @@
       + note + btn + after + '</div>';
   }
   /* Desktop: a weekend per row, Saturday left, Sunday right, a dashed slot for a weekend day with nothing on it.
-     A weekday event gets a full-width row. Days come from each event's own Pacific date. */
+     A weekday event gets a full-width row. Days come from each event's own Pacific date. A slot for TODAY or earlier
+     stays blank: a finished event drops off the list, and "No qualifier scheduled" would be false (nemesis developer). */
   function gridHtml(evs, signedIn) {
-    const rows = [], byKey = new Map();
+    const rows = [], byKey = new Map(), today = ymdOf(new Date().toISOString());
     evs.forEach(e => {
       const wd = dPart(e.starts_at, { weekday: 'short' }), day = ymdOf(e.starts_at);
       const slot = wd === 'Sat' ? 'sat' : wd === 'Sun' ? 'sun' : 'day';
@@ -503,7 +533,7 @@
     });
     rows.sort((a, b) => a.sat < b.sat ? -1 : a.sat > b.sat ? 1 : 0);
     const cell = (list, ymd) => '<div class="day-cell">' + (list.length ? list.map(e => cardHtml(e, signedIn, true)).join('')
-      : '<div class="qual-card card-empty"><div class="empty-day">' + esc(ymdLabel(ymd)) + '</div><div class="empty-msg">No qualifier scheduled</div></div>') + '</div>';
+      : ymd <= today ? '' : '<div class="qual-card card-empty"><div class="empty-day">' + esc(ymdLabel(ymd)) + '</div><div class="empty-msg">No qualifier scheduled</div></div>') + '</div>';
     const weekend = rows.some(r => r.sat_.length || r.sun_.length);
     return '<div id="cards"' + (weekend ? ' class="grid"' : '') + '>'
       + (weekend ? '<div class="grid-col-header">Saturday</div><div class="grid-col-header">Sunday</div>' : '')
@@ -513,7 +543,7 @@
   /* The schedule block, legacy order: divider, contact banner, 10-scores note, the cards. */
   function scheduleHtml(evs, signedIn) {
     const list = !evs.length ? '<div id="cards"><div class="msg msg-info">No qualifier events are currently scheduled.</div></div>'
-      : DESK.matches ? gridHtml(evs, signedIn) : '<div id="cards">' + evs.map(e => cardHtml(e, signedIn, false)).join('') + '</div>';
+      : isDesk() ? gridHtml(evs, signedIn) : '<div id="cards">' + evs.map(e => cardHtml(e, signedIn, false)).join('') + '</div>';
     const out = '<div class="section-divider"><span>Available Qualifiers</span></div>' + contactHtml()
       + '<div class="eligibility-note">&#9888;&#65039; You must have at least 10 scores in the format within the last 2 years to qualify.</div>'
       + list + howItWorks();
@@ -527,12 +557,25 @@
     app.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => gotoCard(+b.dataset.goto));
     const bar = $('regBar');
     if (bar) bar.onclick = () => { S.regOpen = !S.regOpen; $('regSummary').classList.toggle('expanded', S.regOpen); bar.setAttribute('aria-expanded', String(S.regOpen)); };
+    _closedSig = closedSig();
   }
   function gotoCard(id) {
     const c = app.querySelector('[data-ev="' + id + '"]'); if (!c) return;
     c.scrollIntoView({ behavior: 'smooth', block: 'center' });
     c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 800);
   }
+  /* Re-draw the current view from data already loaded (a device-class change, a cutoff passing, a refresh that landed
+     while a modal or the player's own action was open). Deferred, never dropped: closing the modal replays it. */
+  function repaint() {
+    if (S.busy || S.loading || S.offline || $('modal')) { S.dirty = true; return; }
+    S.dirty = false;
+    if (S.token) { if (S.me) render(); } else if (Array.isArray(S.pub)) renderPublic();
+  }
+  let _closedSig = '';
+  const closedSig = () => (S.token ? S.events : (S.pub || [])).map(e => Date.now() >= closesAt(e) ? 1 : 0).join('');
+  setInterval(() => { if (closedSig() !== _closedSig) repaint(); }, 60000);   /* a page left open stops offering Register at the cutoff */
+  let _dev = spmDevice();
+  addEventListener('resize', () => { const c = spmDevice(); const flip = (c === 'desktop') !== (_dev === 'desktop'); _dev = c; if (flip) repaint(); });
 
   /* ── signed out: the public schedule + the sign-in bar ── */
   async function loadPublic() {
@@ -544,6 +587,7 @@
     } catch (e) { return null; }
   }
   function renderPublic() {
+    S.dirty = false;
     setStatus(S.pub.length);
     app.innerHTML = scheduleHtml(S.pub, false);
     wire();
@@ -557,8 +601,9 @@
     seed.then(p => { if (p !== null && !S.token) { _dataPulse = p; _dataPulseKey = 'index'; } });
     if (S.token) return;   /* signed in while we were loading */
     if (evs === null) {
-      setStatus(0);
-      app.innerHTML = '<div class="msg msg-error">We could not load the schedule.</div><button type="button" class="register-btn" id="retry">Try Again</button>';
+      S.pub = null; setStatus(0);
+      app.innerHTML = '<div class="msg msg-error">We could not load the schedule. Check your signal, then try again.</div>'
+        + '<button type="button" class="register-btn" id="retry">Try Again</button><div style="height:14px"></div>' + contactHtml();
       $('retry').onclick = () => showSignedOut();
       return;
     }
@@ -572,21 +617,29 @@
     showMsg(null); $('notFound').hidden = true;
     const r = await spmAuth.requestLink(v, 'multipass', $('hp').value).catch(() => ({ ok: false, error: 'We lost the connection. Check your signal and try again.' }));
     $('send').disabled = false; $('ident').disabled = false; $('send').textContent = 'SIGN IN';
-    if (!r || !r.ok) { showMsg('error', (r && r.error) || 'Something went wrong. Please try again.'); $('notFound').hidden = false; return; }
+    if (!r || !r.ok) {
+      showMsg('error', (r && r.error) || 'Something went wrong. Please try again.');
+      /* the tips are for "not found" ONLY (the server's exact sentence); any other failure already says its own reason */
+      if (/^We could not find that email or APA number/.test((r && r.error) || '')) $('notFound').hidden = false;
+      return;
+    }
     $('ident').value = '';
     showMsg('info', 'Check your email' + (r.first_name ? ', ' + r.first_name : '') + '. We sent a sign-in link to the address on your APA record. It works for 30 minutes and keeps you signed in on this device.');
   });
 
   /* ── signed in ──
-     Exceptions only, legacy style: the yellow "not an active player" banner, a not-eligible or qualified banner per
-     format. The ordinary cases are on the cards (eligibility badge) and the 10-scores note. */
+     Exceptions only, legacy style: the yellow "not an active player" banner, a not-on-a-team, not-eligible or qualified
+     banner per format. The ordinary cases are on the cards (eligibility badge) and the 10-scores note. */
   function formatStatus(evs) {
     const out = [];
     const groups = [];
     ['8', '9'].forEach(f => { [...new Set(evs.filter(e => e.format === f).map(e => e.regionals_season))].forEach(season => groups.push([f, season])); });
     /* rostered comes from the server per event; a pause or a cutoff no longer masks "not on a team" */
     const notOn = groups.filter(([f, season]) => !evs.some(e => e.format === f && e.regionals_season === season && e.rostered));
-    if (groups.length && notOn.length === groups.length && !evs.some(e => e.qualified)) {
+    /* the legacy whole-account banner only when BOTH formats were checked and neither found a team: with one format open,
+       all the page knows is that one format (nemesis user lens 2026-10-23: a 9-Ball player was told "not active") */
+    const both = groups.some(g => g[0] === '8') && groups.some(g => g[0] === '9');
+    if (both && notOn.length === groups.length && !evs.some(e => e.qualified)) {
       return '<div class="ineligible-banner"><div class="error-content">'
         + '<p><strong>We found your account, but you are not currently listed as an active player this session.</strong></p>'
         + '<p>This can happen if:</p><ul>'
@@ -599,9 +652,9 @@
       const mine = evs.filter(e => e.format === f && e.regionals_season === season);
       if (!mine.length) return;
       const many = groups.filter(g => g[0] === f).length > 1;
-      const L = fmtLabel(f) + (many ? ' for ' + season + ' Regionals' : '');
+      const L = fmtLabel(f) + (many ? ' for ' + esc(season) + ' Regionals' : '');
       if (mine.some(e => e.qualified)) { out.push('<div class="status-banner good"><b>' + L + ': you qualified for Regionals.</b> Congratulations. No need to play another ' + fmtLabel(f) + ' qualifier.</div>'); return; }
-      if (!mine.some(e => e.rostered)) { out.push('<div class="ineligible-banner"><b>We do not see you on a ' + fmtLabel(f) + ' team this session</b>, so you cannot register online for ' + L + '. If that is wrong, reach out below and we will add you.</div>'); return; }
+      if (!mine.some(e => e.rostered)) { out.push('<div class="ineligible-banner"><b>We do not see you on ' + (f === '8' ? 'an ' : 'a ') + fmtLabel(f) + ' team this session</b>, so you cannot register online for ' + L + '. If that is wrong, reach out below and we will add you.</div>'); return; }
       const el = (mine.find(e => e.eligibility) || {}).eligibility || 'unconfirmed';
       if (el === 'ineligible') out.push('<div class="status-banner stop"><b>' + L + ': the league office has you as not eligible.</b> If that is wrong, reach out below.</div>');
     });
@@ -639,18 +692,34 @@
     render();
   }
   function render() {
-    S.offline = false; chrome();
+    S.offline = false; S.dirty = false; chrome();
     const evs = S.events;
     setStatus(evs.length);
     app.innerHTML = (S.maintenance ? '<div class="msg msg-info"><b>Sign-ups are paused for a few minutes.</b> Please try again shortly.</div>' : '')
       + formatStatus(evs) + regSummaryHtml(evs) + scheduleHtml(evs, true);
     wire();
   }
+  /* A LIVE refresh (the pulse saw a change) never swaps a good screen for an error: on a failed load it keeps what is on
+     screen and the next poll tries again; it never shows a spinner or moves the scroll (nemesis developer + ui). */
+  async function refreshQuiet() {
+    if (S.token) {
+      S.loading = true;
+      const res = await loadSignedIn().finally(() => { S.loading = false; });
+      if (!res) return true;            /* the session ended: already handled (signed out) */
+      if (!res.ok) return false;
+    } else {
+      const evs = await loadPublic();
+      if (evs === null) return false;
+      if (S.token) return true;         /* signed in meanwhile: that view loads its own data */
+      S.pub = evs;
+    }
+    repaint(); return true;
+  }
   function setBusy(on) { S.busy = on; app.querySelectorAll('button[data-reg],button[data-cancel]').forEach(b => b.disabled = on); }
 
   /* ── modals (legacy: "You're Registered!", "Cancel Registration", "Registration Failed") ── */
   function openModal(inner, focusId) {
-    closeModal();
+    const old = $('modal'); if (old) old.remove();
     const back = document.createElement('div'); back.className = 'modal'; back.id = 'modal';
     back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true'); back.setAttribute('aria-labelledby', 'modalTitle');
     back.innerHTML = '<div class="modal-panel">' + inner + '</div>';
@@ -658,8 +727,8 @@
     back.addEventListener('click', ev => { if (ev.target === back) closeModal(); });
     if (focusId && $(focusId)) $(focusId).focus();
   }
-  function closeModal() { const m = $('modal'); if (m) m.remove(); }
-  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeModal(); });
+  function closeModal() { const m = $('modal'); if (m) m.remove(); if (S.dirty) repaint(); }
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && $('modal')) closeModal(); });
   function infoModal(title, text, extra) {
     openModal('<div class="modal-title" id="modalTitle">' + esc(title) + '</div><div class="modal-message">' + esc(text) + (extra || '') + '</div>'
       + '<div class="modal-actions"><button type="button" class="modal-btn modal-btn-ok" id="infoOk">Got It</button></div>', 'infoOk');
@@ -670,6 +739,14 @@
     if (state === 'ineligible') return '<div class="elig-callout stop"><b>&#10005; Not Eligible</b>Contact us if you believe this is an error.</div>';
     return '<div class="elig-callout warn"><b>&#9888;&#65039; Eligibility Pending</b>The league office still checks the 10-scores rule. Check back here for updates.</div>';
   }
+  /* what the server says about the email (mpSend_: sent / blocked / failed; quiet = test drill), never an assumption */
+  function mailLine(email, kind) {
+    if (email === 'sent' || email === 'quiet') return kind === 'cancel' ? 'We emailed you a calendar update that removes it.'
+      : 'A confirmation email with a calendar invite is on its way to the address on your APA record.';
+    const why = email === 'blocked' ? 'The address on your APA record is not taking our email, so no email went out.'
+      : 'Our email did not go out this time.';
+    return why + (kind === 'cancel' ? ' Please take it off your calendar yourself.' : ' Your registration is saved, and this page shows it.');
+  }
   async function register(id) {
     if (S.busy) return;                       /* a double tap sends one request; the server's UNIQUE is the real guard */
     const e = S.events.find(x => x.id === id); if (!e) return;
@@ -679,7 +756,7 @@
     if (!r.ok && spmAuth.isAuthErr(r.error)) { setBusy(false); return handleSessionErr(r.error); }
     await showSignedIn(); setBusy(false);   /* busy until the fresh state is on screen: no second tap on a stale card */
     const now = S.events.find(x => x.id === id) || e;
-    if (r.ok) infoModal('You\'re Registered!', fmtLabel(e.format) + ' qualifier on ' + longDay(e.starts_at) + '.\nA confirmation email with a calendar invite is on its way to the address on your APA record.', eligCallout(now.eligibility));
+    if (r.ok) infoModal('You\'re Registered!', fmtLabel(e.format) + ' qualifier on ' + longDay(e.starts_at) + '.\n' + mailLine(r.email, 'confirm'), eligCallout(now.eligibility));
     else if (r.offline) infoModal('Connection Lost', 'We lost the connection before we heard back. The page now shows where things stand. If you are not registered, try again.');
     else infoModal('Registration Failed', r.error || 'Registration failed. Please try again.');
   }
@@ -691,21 +768,16 @@
       + '<button type="button" class="modal-btn modal-btn-confirm" id="yesCancel">Yes, Cancel</button></div>', 'keep');
     $('keep').onclick = closeModal;
     $('yesCancel').onclick = async () => {
-      closeModal();
-      setBusy(true);
+      setBusy(true); closeModal();
       const btn = app.querySelector('[data-cancel="' + id + '"]'); if (btn) { btn.textContent = 'CANCELLING…'; btn.classList.add('working'); }
       const r = await gas('mp_cancel', { token: S.token, event_id: id });
       if (!r.ok && spmAuth.isAuthErr(r.error)) { setBusy(false); return handleSessionErr(r.error); }
       await showSignedIn(); setBusy(false);
-      if (r.ok) infoModal('Registration Cancelled', fmtLabel(e.format) + ' qualifier on ' + longDay(e.starts_at) + '.\nWe emailed you a calendar update that removes it.');
+      if (r.ok) infoModal('Registration Cancelled', fmtLabel(e.format) + ' qualifier on ' + longDay(e.starts_at) + '.\n' + mailLine(r.email, 'cancel'));
       else if (r.offline) infoModal('Connection Lost', 'We lost the connection before we heard back. The page now shows where things stand.');
       else infoModal('Cancellation Failed', r.error || 'Cancellation failed. Please try again.');
     };
   }
-  DESK.addEventListener('change', () => {   /* crossing 1200 px swaps the list for the weekend grid and back */
-    if (S.busy || S.loading || S.offline || $('modal')) return;
-    if (S.token && S.me) render(); else if (!S.token && S.pub) renderPublic();
-  });
 
   /* ── session ── */
   function handleSessionErr(msg) { spmAuth.clear(); S.token = null; S.me = null; closeModal(); showSignedOut(msg || 'Your session expired. Sign in again.'); }
@@ -747,7 +819,8 @@
    Signed out: the schedule only ('index'). Skips while a modal is open, a request is in flight, the sign-in box has
    focus, or the tab is hidden. The baseline is sampled when each view LOADS (before its data), not on the first
    poll: seeding on the first poll baked any change made in the first 20 s into the baseline and it never showed
-   (caught by ui-multipass desktop:live, 2026-10-22). */
+   (caught by ui-multipass desktop:live, 2026-10-22). A refresh that fails restores the old baseline, so the next
+   poll tries again instead of believing it is current. */
   var _dataPulse = null, _dataPulseKey = null;   /* a baseline is only a baseline for the key it was taken with */
   const pulseKey = () => S.token && S.me ? S.token : 'index';
   const pollOk = () => !S.busy && !S.loading && !S.offline && !$('modal')
@@ -772,7 +845,7 @@
     if (!pollOk() || key !== pulseKey()) return;    /* re-checked AFTER the wait: a tap, a sign-in or a load may have started */
     if (key !== _dataPulseKey) { _dataPulse = null; _dataPulseKey = key; }
     if (_dataPulse === null) { _dataPulse = p; return; }
-    if (p !== _dataPulse) { _dataPulse = p; if (S.token) showSignedIn(); else showSignedOut(); }   /* the last confirmation stays */
+    if (p !== _dataPulse) { const was = _dataPulse; _dataPulse = p; refreshQuiet().then(ok => { if (!ok && _dataPulseKey === key) _dataPulse = was; }); }
   }
   setInterval(pollDataPulse, 30000);   /* the house interval (validate-app-pulse); a change shows within one poll + the fetch */
   document.addEventListener('visibilitychange', function () { if (!document.hidden) pollDataPulse(); });
