@@ -148,6 +148,7 @@
   .qual-location.tba{ color:var(--muted); text-decoration:none; }
   .qual-fee{ font-size:1.05rem; color:var(--muted); margin-bottom:calc(14px*var(--k)); }
   .qual-fee.paid{ color:#155724; font-weight:700; }
+  .nw{ white-space:nowrap; }
   .elig-badge{ display:block; width:90%; margin:0 auto calc(10px*var(--k)); font-size:.92rem; font-weight:700; padding:calc(8px*var(--k)) calc(14px*var(--k)); border-radius:calc(12px*var(--k));
     letter-spacing:.04em; text-align:center; }
   .elig-pending{ background:#fff3cd; color:#856404; border:1px solid #ffc107; }
@@ -477,14 +478,14 @@
     else btn = '<button type="button" class="register-btn" disabled>Register</button>';
     if (blocked && e.why_text) note = '<div class="card-note">' + esc(e.why_text) + '</div>';
     if (reg && e.qualified) note = '<div class="card-note">You already qualified in ' + fmtLabel(e.format) + ', so you do not need this one. Cancel it to free up the spot.</div>';
-    if (closed && !reg) after = '<div class="card-after">Online registration for this qualifier has closed. Walk-ins are welcome on the day.</div>';
+    if (closed && !reg) after = '<div class="card-after">Online registration has closed. Walk-ins are welcome.</div>';
     return '<div class="' + cls + '" data-ev="' + e.id + '">'
       + '<div class="qual-date">' + esc(inCol ? monthDay(e.starts_at) : longDay(e.starts_at)) + '</div>'
       + '<div class="badges"><span class="format-badge ' + fmtClass(e.format) + '">' + fmtLabel(e.format) + '</span>'
       + (e.is_test ? '<span class="format-badge test-badge">TEST</span>' : '') + '</div>'
-      + '<div class="qual-time">Doors ' + esc(timeText(e.starts_at)) + (e.last_board_at ? ' · Last boards ' + esc(timeText(e.last_board_at)) : '') + '</div>'
+      + '<div class="qual-time"><span class="nw">Doors ' + esc(timeText(e.starts_at)) + '</span>' + (e.last_board_at ? ' · <span class="nw">Last boards ' + esc(timeText(e.last_board_at)) + '</span>' : '') + '</div>'
       + where
-      + '<div class="qual-fee' + (reg && e.paid ? ' paid' : '') + '">' + cost + (reg && e.paid ? ' · Paid' : ' for the day · pay at the door') + '</div>'
+      + '<div class="qual-fee' + (reg && e.paid ? ' paid' : '') + '">' + cost + (reg && e.paid ? ' · Paid' : ' · pay at the door') + '</div>'
       + (reg ? '<span class="elig-badge ' + el[1] + '">' + el[2] + '</span>' : '')
       + note + btn + after + '</div>';
   }
