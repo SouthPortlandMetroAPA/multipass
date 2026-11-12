@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head><title>OG Image Generator</title></head>
+<body style="margin:0;background:#000;">
+<canvas id="c" width="1200" height="630"></canvas>
+<script>
+// Open this file in a browser, right-click the canvas, "Save image as" → og-image.png
+var c = document.getElementById('c');
+var ctx = c.getContext('2d');
+
+// Background gradient
+var bg = ctx.createLinearGradient(0, 0, 1200, 630);
+bg.addColorStop(0, '#0a0a0a');
+bg.addColorStop(1, '#1a1a2e');
+ctx.fillStyle = bg;
+ctx.fillRect(0, 0, 1200, 630);
+
+// Top accent bar
+var accent = ctx.createLinearGradient(0, 0, 1200, 0);
+accent.addColorStop(0, '#ea002a');
+accent.addColorStop(1, '#ff4466');
+ctx.fillStyle = accent;
+ctx.fillRect(0, 0, 1200, 6);
+ctx.fillRect(0, 624, 1200, 6);
+
+// MULTIPASS
+ctx.textAlign = 'center';
+ctx.font = '900 96px "Arial Black", Impact, sans-serif';
+ctx.fillStyle = '#ea002a';
+ctx.letterSpacing = '8px';
+ctx.fillText('MULTIPASS', 600, 270);
+
+// Subtitle
+ctx.font = '600 28px Arial, sans-serif';
+ctx.fillStyle = '#888';
+ctx.fillText('SOUTH PORTLAND METRO APA', 600, 340);
+
+// Tagline
+ctx.font = '400 24px Arial, sans-serif';
+ctx.fillStyle = '#ccc';
+ctx.fillText('Singles Qualifier Registration', 600, 420);
+
+// Instructions
+document.body.insertAdjacentHTML('beforeend',
+  '<p style="color:#fff;text-align:center;margin-top:20px;font-family:sans-serif;">' +
+  'Right-click the image above → "Save image as" → save as <b>og-image.png</b> in this folder</p>');
+</script>
+</body>
+</html>

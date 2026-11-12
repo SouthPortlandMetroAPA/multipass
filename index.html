@@ -2,225 +2,544 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Singles Qualifiers &middot; South Portland Metro APA</title>
-<meta name="description" content="Register for South Portland Metro APA singles qualifiers.">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Singles Qualifiers — South Portland Metro APA</title>
 <link rel="icon" href="favicon.svg">
+<meta name="description" content="Register for South Portland Metro APA Play Til You Win singles qualifiers.">
+<meta property="og:title" content="Singles Qualifiers — South Portland Metro APA">
+<meta property="og:description" content="Register for a Play Til You Win singles qualifier.">
+<meta property="og:image" content="https://southportlandmetroapa.github.io/multipass/og-image.png">
+<!--
+================================================================================
+MultiPass — index.html  (public, open registration)
+================================================================================
+PURPOSE
+  Players see the scheduled Play Til You Win singles qualifiers and register for
+  one or more. No login. Confirmation email carries an .ics calendar invite and a
+  cancel link that works on any device.
+
+DEPENDENCIES
+  - GAS mailer (rolodex-mailer Code.gs), actions: sq_events / sq_register / sq_cancel
+  - version.js — bumped on every change; the page self-reloads when it goes stale
+  NO Supabase key lives in this page. Everything goes through the GAS endpoint.
+
+DATA FLOW
+  sq_events  -> public qualifier list (no registrant data of any kind)
+  sq_register-> all four identity fields come from THIS FORM; the server reads no
+                member table. (APA Nationals: nothing built on Nexus-exported data.)
+  sq_cancel  -> by HMAC token only
+
+PRECONDITIONS THAT WILL BITE YOU
+  1. member_number is CHECK-constrained to EXACTLY 8 DIGITS in multipass.registrations.
+     Anything shorter is rejected by the database with 23514, which surfaced to
+     players as "Could not save your registration". The form forces 8 digits; do not
+     relax it here without relaxing the constraint too.
+  2. All times render in America/Los_Angeles explicitly. Never let a bare Date
+     render a wall time — that shipped an Eastern .ics once already.
+  3. localStorage is a CONVENIENCE ONLY. The emailed cancel link is the real
+     recall path: localStorage is per-device and vanishes when site data clears.
+
+BRANDING
+  Light theme, APA red #ea002a + blue #0031a1, matching PatchCheck / SharpShooters.
+  Tokens are inlined deliberately — validate-ui-brand.mjs requires the literal
+  values in the file and does not accept a comment or a bare stylesheet link.
+================================================================================
+-->
+<script src="version.js"></script>
 <style>
-  :root{--red:#ea002a;--blue:#0031a1;--ink:#15171a;--mut:#5b6169;--bg:#f5f6f8;--card:#fff;--line:#e3e6ea;--ok:#0a7d32}
-  @media (prefers-color-scheme:dark){:root{--ink:#f2f4f7;--mut:#a7aeb6;--bg:#121417;--card:#1b1e22;--line:#2b3037;--ok:#4ade80}}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  .wrap{max-width:660px;margin:0 auto;padding:16px 16px 56px}
-  header{text-align:center;padding:22px 0 8px}
-  .bar{height:4px;width:60px;margin:0 auto 16px;background:linear-gradient(90deg,var(--red),var(--blue));border-radius:2px}
-  h1{margin:0 0 4px;font-size:1.45rem;letter-spacing:-.02em}
-  .sub{margin:0;color:var(--mut);font-size:.95rem}
-  h2{margin:26px 0 10px;font-size:1.05rem;letter-spacing:.02em;text-transform:uppercase;color:var(--mut)}
-  .q{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 10px}
-  .q.on{border-color:var(--ok)}
-  .qt{font-weight:650;margin:0 0 2px}
-  .qm{color:var(--mut);font-size:.9rem;margin:0 0 2px}
-  .fee{color:var(--mut);font-size:.85rem;margin:0}
-  .row{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
-  button{font:inherit;font-weight:650;border:0;border-radius:9px;padding:12px 18px;min-height:46px;cursor:pointer}
-  .reg{background:var(--red);color:#fff;flex:1}
-  .reg:hover{filter:brightness(1.07)}
-  .unreg{background:transparent;color:var(--mut);border:1px solid var(--line)}
-  .badge{color:var(--ok);font-weight:650;font-size:.92rem}
-  button:focus-visible,input:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
-  dialog{border:0;border-radius:14px;padding:0;max-width:420px;width:calc(100% - 32px);background:var(--card);color:var(--ink)}
-  dialog::backdrop{background:rgba(0,0,0,.55)}
-  .dlg{padding:22px}
-  .dlg h3{margin:0 0 4px;font-size:1.1rem}
-  .dlg p.for{margin:0 0 16px;color:var(--mut);font-size:.9rem}
-  label{display:block;font-size:.82rem;color:var(--mut);margin:10px 0 4px;font-weight:600}
-  input{width:100%;padding:12px;font:inherit;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)}
-  .err{color:var(--red);font-size:.88rem;margin:10px 0 0;min-height:1.1em}
-  .note{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 14px;color:var(--mut);font-size:.88rem;margin:18px 0 0}
-  footer{text-align:center;color:var(--mut);font-size:.8rem;margin-top:30px}
-  .empty{color:var(--mut);text-align:center;padding:26px 0}
+/* ── SPM shared base (inlined from Apps/shared/spm-base.css) ───────────── */
+:root{
+  --spm-primary:#ea002a;
+  --spm-accent:#0031a1;
+  --bg:#f5f5f5;
+  --card:#ffffff;
+  --border:#e1e1e1;
+  --text:#1f1f1f;
+  --muted:#666;
+  --ok-bg:#e8f0fe;
+  --ok-border:#afc6f0;
+  --ok-text:#1a3b6b;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;width:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+
+.spm-page{width:100%;max-width:900px;margin:0 auto;padding:12px}
+@media(min-width:768px){.spm-page{padding:16px 20px}}
+@media(min-width:1200px){.spm-page{padding:20px 30px}}
+
+.spm-header{border-radius:22px;padding:22px 20px 20px;color:#fff;
+  background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));
+  box-shadow:0 6px 18px rgba(0,0,0,.25);text-align:center;margin-bottom:18px}
+.spm-header h1{margin:0;font-size:clamp(1.25rem,1rem + 1.5vw,1.75rem);font-weight:900;letter-spacing:-.02em}
+.spm-header .spm-subtitle{margin:4px 0 0;font-size:clamp(1rem,.75rem + 1vw,1.35rem);
+  font-weight:500;font-style:italic;opacity:.92}
+
+.spm-card{background:var(--card);border:1px solid var(--border);border-radius:22px;
+  padding:20px;box-shadow:0 3px 10px rgba(0,0,0,.1);margin-bottom:16px}
+
+.spm-btn{display:inline-block;border:none;border-radius:999px;padding:12px 24px;font-weight:700;
+  font-size:1rem;cursor:pointer;text-decoration:none;text-align:center;min-height:44px;
+  transition:filter .15s,transform .15s;font-family:inherit}
+.spm-btn:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.spm-btn:active{transform:translateY(0)}
+.spm-btn:disabled{opacity:.55;cursor:default;transform:none;filter:none}
+.spm-btn-primary{background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));color:#fff}
+.spm-btn-secondary{background:#fff;color:var(--text);border:2px solid var(--border)}
+.spm-btn-danger{background:#fff;color:var(--spm-primary);border:2px solid var(--spm-primary)}
+
+.spm-badge{display:inline-block;padding:4px 12px;border-radius:999px;font-size:.75rem;
+  font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+
+.spm-modal{position:fixed;inset:0;background:rgba(0,0,0,.68);display:none;align-items:center;
+  justify-content:center;z-index:9999;padding:20px}
+.spm-modal.active{display:flex}
+.spm-modal-panel{width:100%;max-width:520px;background:#fff;border-radius:22px;padding:24px;
+  box-shadow:0 16px 40px rgba(0,0,0,.45);max-height:90svh;overflow-y:auto}
+
+.spm-footer{text-align:center;font-size:.8rem;color:var(--muted);padding:24px 0 16px}
+
+/* ── Page-specific ─────────────────────────────────────────────────────── */
+
+/* Weekend group: adjacent Sat/Sun are one unit, in date order. */
+.weekend{margin:0 0 26px}
+.weekend-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;
+  padding:0 6px 10px;border-bottom:2px solid var(--border);margin-bottom:14px}
+.weekend-title{margin:0;font-size:1.05rem;font-weight:800;letter-spacing:-.01em}
+.weekend-venue{margin:0;font-size:.9rem;color:var(--muted)}
+
+.qgrid{display:grid;gap:14px}
+@media(min-width:768px){.qgrid{grid-template-columns:1fr 1fr;align-items:start}}
+
+.q{margin-bottom:0;display:flex;flex-direction:column;gap:12px}
+.q-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.badge-8{background:var(--spm-primary);color:#fff}
+.badge-9{background:var(--spm-accent);color:#fff}
+.q-when{font-weight:700;font-size:1.02rem}
+.q-title{margin:0;font-size:1rem;font-weight:700;line-height:1.3}
+.q-sub{margin:0;font-size:.92rem;color:var(--muted)}
+.q-meta{margin:0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;font-size:.92rem}
+.q-meta dt{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.05em;padding-top:3px;white-space:nowrap}
+.q-meta dd{margin:0;overflow-wrap:anywhere}
+.q-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:auto}
+.q-actions .spm-btn{flex:1 1 auto}
+
+.q.is-in{border-color:var(--ok-border);background:var(--ok-bg)}
+.badge-in{background:var(--ok-text);color:#fff}
+
+/* Form */
+.field{margin:0 0 14px;text-align:left}
+.field label{display:block;font-weight:700;font-size:.9rem;margin-bottom:5px}
+.field input{width:100%;padding:12px 14px;font-size:1rem;font-family:inherit;color:var(--text);
+  background:#fff;border:2px solid var(--border);border-radius:12px;min-height:46px}
+.field input:focus{outline:none;border-color:var(--spm-accent)}
+.field input.bad{border-color:var(--spm-primary);background:#fff6f7}
+.hint{margin:5px 0 0;font-size:.8rem;color:var(--muted)}
+.err{margin:0 0 14px;color:var(--spm-primary);font-weight:700;font-size:.92rem;text-align:left}
+.err:empty{display:none}
+
+.modal-title{margin:0 0 4px;font-size:1.2rem;font-weight:800}
+.modal-sub{margin:0 0 18px;color:var(--muted);font-size:.95rem}
+.modal-actions{display:flex;gap:10px;margin-top:4px}
+.modal-actions .spm-btn{flex:1 1 0}
+
+.note{margin:14px 0 0;padding-top:12px;border-top:1px solid var(--border);
+  font-size:.85rem;color:var(--muted);line-height:1.45}
+
+.state{text-align:center;color:var(--muted);padding:34px 16px}
+
+/* Canonical "Updating…" overlay — same treatment as every other SPM app. */
+.update-overlay{position:fixed;inset:0;background:rgba(10,20,40,.72);display:none;
+  align-items:center;justify-content:center;z-index:10000;padding:24px}
+.update-overlay.shown{display:flex}
+.update-box{background:#fff;border-radius:12px;padding:36px 32px;max-width:420px;width:100%;
+  text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.4)}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="bar"></div>
-    <h1>Singles Qualifiers</h1>
-    <p class="sub">South Portland Metro APA &middot; play till you win</p>
-  </header>
 
-  <div id="list"><p class="empty">Loading qualifiers&hellip;</p></div>
-
-  <p class="note" id="note" hidden>
-    Walk-ins are welcome &mdash; registering just helps us plan boards and have your
-    paperwork ready. Pay at the door, cash or Venmo.
-  </p>
-
-  <footer>South Portland Metro APA</footer>
+<div class="update-overlay" id="updating" role="status" aria-live="polite">
+  <div class="update-box">
+    <h2 style="margin:0 0 8px;font-size:1.1rem">Updating…</h2>
+    <p style="margin:0;color:#666">A new version just shipped. Reloading.</p>
+  </div>
 </div>
 
-<dialog id="dlg"><form method="dialog" class="dlg" id="frm">
-  <h3>Register</h3>
-  <p class="for" id="dfor"></p>
-  <label for="f_apa">APA member number</label>
-  <input id="f_apa" inputmode="numeric" autocomplete="off" maxlength="9" placeholder="e.g. 12345678">
-  <label for="f_first">First name</label>
-  <input id="f_first" autocomplete="given-name" maxlength="60">
-  <label for="f_last">Last name</label>
-  <input id="f_last" autocomplete="family-name" maxlength="60">
-  <label for="f_email">Email (for your confirmation and calendar invite)</label>
-  <input id="f_email" type="email" inputmode="email" autocomplete="email" maxlength="120">
-  <p class="err" id="derr"></p>
-  <div class="row">
-    <button class="reg" id="go" type="button">Register</button>
-    <button class="unreg" id="cancelbtn" type="button">Close</button>
+<div class="spm-page">
+
+  <header class="spm-header">
+    <h1>Singles Qualifiers</h1>
+    <p class="spm-subtitle">Play Til You Win</p>
+  </header>
+
+  <main id="list" aria-live="polite">
+    <div class="state">Loading qualifiers…</div>
+  </main>
+
+  <p class="spm-footer">
+    South Portland Metro APA · Questions?
+    <a href="mailto:southportlandmetroapa@gmail.com" style="color:var(--spm-primary);font-weight:700">email us</a>
+  </p>
+</div>
+
+<!-- Register dialog -->
+<div class="spm-modal" id="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+  <div class="spm-modal-panel">
+    <h2 class="modal-title" id="dlg-title">Register</h2>
+    <p class="modal-sub" id="dlg-sub"></p>
+
+    <div class="field">
+      <label for="f-mn">APA member number</label>
+      <input id="f-mn" inputmode="numeric" autocomplete="off" maxlength="8"
+             placeholder="8 digits" aria-describedby="mn-hint">
+      <p class="hint" id="mn-hint">All 8 digits, exactly as printed on your APA card.</p>
+    </div>
+    <div class="field">
+      <label for="f-fn">First name</label>
+      <input id="f-fn" autocomplete="given-name" maxlength="60">
+    </div>
+    <div class="field">
+      <label for="f-ln">Last name</label>
+      <input id="f-ln" autocomplete="family-name" maxlength="60">
+    </div>
+    <div class="field">
+      <label for="f-em">Email</label>
+      <input id="f-em" type="email" inputmode="email" autocomplete="email" maxlength="120">
+      <p class="hint">Your confirmation and calendar invite go here.</p>
+    </div>
+
+    <p class="err" id="dlg-err"></p>
+
+    <div class="modal-actions">
+      <button class="spm-btn spm-btn-primary" id="dlg-go">Register</button>
+      <button class="spm-btn spm-btn-secondary" id="dlg-close">Close</button>
+    </div>
+    <p class="note">You can cancel any time — from this device, or from the link in your
+      confirmation email.</p>
   </div>
-</form></dialog>
+</div>
 
 <script>
-// ───────────────────────────────────────────────────────────────────────────
-// Open registration. No login, no session, no server-side identity lookup.
-// Everything the server learns is what the player typed into this dialog.
-//
-// localStorage holds two things:
-//   spm-sq-me    their details, so the dialog is prefilled next time
-//   spm-sq-regs  { eventId: cancelToken } so this device can show + undo
-// It is per-device by nature, which is why the cancel token also travels in
-// the confirmation email: switch phones or clear site data and the emailed
-// link still works. localStorage is a convenience, never the only route.
-// Every read/write is wrapped — storage throws in some private modes.
-// ───────────────────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   Open registration. No login, no session, no server-side identity lookup.
+   Everything the server learns is what the player typed into the dialog.
+
+   localStorage holds two things:
+     spm-sq-me    their details, so the dialog is prefilled next time
+     spm-sq-regs  { eventId: cancelToken } so this device can show and undo
+   Per-device by nature, which is why the cancel token also travels in the
+   confirmation email. Every read/write is wrapped — storage throws in some
+   private modes and must never take the page down.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 var GAS = "https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec";
-var K_ME = 'spm-sq-me', K_REGS = 'spm-sq-regs';
-var FMT = { '8': '8-Ball', '9': '9-Ball' };
+var TZ = 'America/Los_Angeles';
+
+/* The database CHECK on multipass.registrations.member_number is exactly 8 digits.
+   Keep this in lockstep with the server-side test in handleSqRegister. */
+var MN_DIGITS = 8;
+
+var events = [];
+var regs = lsGet('spm-sq-regs', {});
+var me = lsGet('spm-sq-me', {});
+var current = 0;
 
 function lsGet(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
-function post(payload) {
-  return fetch(GAS, { method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },   // never application/json: CORS preflight GAS cannot answer
-    body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
-}
-
-function fmtWhen(iso) {
-  var d = new Date(iso);
-  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' })
-       + ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
-}
-
-var EVENTS = [], DLG = document.getElementById('dlg'), CURRENT = null;
-
-function render() {
-  var regs = lsGet(K_REGS, {}), host = document.getElementById('list');
-  if (!EVENTS.length) { host.innerHTML = '<p class="empty">No qualifiers are scheduled right now.</p>'; return; }
-  document.getElementById('note').hidden = false;
-
-  var groups = {};
-  EVENTS.forEach(function (e) { (groups[e.format] = groups[e.format] || []).push(e); });
-
-  host.innerHTML = Object.keys(groups).sort().map(function (f) {
-    return '<h2>' + (FMT[f] || f) + '</h2>' + groups[f].map(function (e) {
-      var on = !!regs[e.id];
-      return '<div class="q' + (on ? ' on' : '') + '">'
-        + '<p class="qt">' + esc(fmtWhen(e.starts_at)) + '</p>'
-        + '<p class="qm">' + esc(e.venue_name || '') + (e.venue_address ? ' &middot; ' + esc(e.venue_address) : '') + '</p>'
-        + '<p class="fee">$' + (e.entry_fee || 0) + ' entry + $' + (e.greens_fee || 0) + ' greens = $'
-        + ((+e.entry_fee || 0) + (+e.greens_fee || 0)) + ' &middot; qualifies for ' + esc(e.regionals_season || '') + '</p>'
-        + '<div class="row">'
-        + (on ? '<span class="badge">&#10003; You are registered</span>'
-                + '<button class="unreg" data-un="' + e.id + '">Unregister</button>'
-              : '<button class="reg" data-reg="' + e.id + '">Register</button>')
-        + '</div></div>';
-    }).join('');
-  }).join('');
-}
 function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
 
-document.addEventListener('click', function (ev) {
-  var r = ev.target.getAttribute && ev.target.getAttribute('data-reg');
-  var u = ev.target.getAttribute && ev.target.getAttribute('data-un');
-  if (r) openDialog(+r);
-  if (u) doCancel(+u);
+/* Browser -> GAS must be text/plain. application/json triggers a CORS preflight
+   that Apps Script cannot answer; GAS parses the raw body regardless. */
+function post(payload) {
+  return fetch(GAS, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload),
+    redirect: 'follow'
+  }).then(function (r) { return r.json(); });
+}
+
+/* ── Pacific-explicit date helpers. Never render a bare wall time. ──────── */
+function pacDate(iso) { return new Date(iso).toLocaleDateString('en-CA', { timeZone: TZ }); }   // YYYY-MM-DD
+function pacDow(iso)  { return new Date(iso).toLocaleDateString('en-US', { weekday: 'long', timeZone: TZ }); }
+function pacDowShort(iso) { return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', timeZone: TZ }); }
+function pacMonDay(iso) { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: TZ }); }
+function pacTime(iso) {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: TZ });
+}
+function fmtWhen(iso) { return pacDow(iso) + ', ' + pacMonDay(iso) + ' · ' + pacTime(iso); }
+
+/* Weekend anchor: a Sunday belongs to the Saturday before it, so an adjacent
+   Sat/Sun pair groups together. Pure calendar arithmetic on the ALREADY
+   Pacific-localised date, so it cannot drift with the viewer's own zone. */
+function weekendKey(iso) {
+  var ymd = pacDate(iso);                       // e.g. "2026-11-15"
+  var dow = new Date(iso).toLocaleDateString('en-US', { weekday: 'short', timeZone: TZ });
+  if (dow !== 'Sun') return ymd;
+  var p = ymd.split('-');
+  var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+  d.setUTCDate(d.getUTCDate() - 1);             // back to Saturday
+  return d.toISOString().slice(0, 10);
+}
+
+function money(n) { var v = Number(n || 0); return '$' + (v % 1 ? v.toFixed(2) : String(v)); }
+
+function formatName(f) { return String(f) === '9' ? '9 Ball' : '8 Ball'; }
+
+/* ── Render ────────────────────────────────────────────────────────────── */
+function render() {
+  var host = document.getElementById('list');
+
+  if (!events.length) {
+    host.innerHTML = '<div class="spm-card state">' +
+      '<p style="margin:0 0 6px;font-weight:700;color:var(--text)">No qualifiers are open right now.</p>' +
+      '<p style="margin:0">Check back soon, or email us and we will let you know when the next one posts.</p>' +
+      '</div>';
+    return;
+  }
+
+  /* Chronological, then grouped into Sat/Sun weekends. */
+  var sorted = events.slice().sort(function (a, b) {
+    return new Date(a.starts_at) - new Date(b.starts_at);
+  });
+
+  var order = [], groups = {};
+  sorted.forEach(function (ev) {
+    var k = weekendKey(ev.starts_at);
+    if (!groups[k]) { groups[k] = []; order.push(k); }
+    groups[k].push(ev);
+  });
+
+  var html = '';
+  order.forEach(function (k) {
+    var g = groups[k];
+    var first = g[0], last = g[g.length - 1];
+
+    /* "Sat Nov 14 – Sun Nov 15", or a single day when there is no pair. */
+    var span = g.length > 1
+      ? pacDowShort(first.starts_at) + ' ' + pacMonDay(first.starts_at) + ' – ' +
+        pacDowShort(last.starts_at) + ' ' + pacMonDay(last.starts_at)
+      : pacDow(first.starts_at) + ', ' + pacMonDay(first.starts_at);
+
+    /* Only claim one venue for the weekend when every event in it agrees. */
+    var venues = g.map(function (e) { return e.venue_name || ''; });
+    var oneVenue = venues.every(function (v) { return v === venues[0]; }) ? venues[0] : '';
+
+    html += '<section class="weekend">' +
+      '<div class="weekend-head">' +
+        '<h2 class="weekend-title">' + esc(span) + '</h2>' +
+        (oneVenue ? '<p class="weekend-venue">' + esc(oneVenue) + '</p>' : '') +
+      '</div><div class="qgrid">';
+
+    g.forEach(function (ev) { html += card(ev); });
+    html += '</div></section>';
+  });
+
+  host.innerHTML = html;
+
+  Array.prototype.forEach.call(host.querySelectorAll('[data-reg]'), function (b) {
+    b.addEventListener('click', function () { openDialog(+b.getAttribute('data-reg')); });
+  });
+  Array.prototype.forEach.call(host.querySelectorAll('[data-cancel]'), function (b) {
+    b.addEventListener('click', function () { doCancel(+b.getAttribute('data-cancel')); });
+  });
+}
+
+function card(ev) {
+  var fmt = formatName(ev.format);
+  var cls = String(ev.format) === '9' ? 'badge-9' : 'badge-8';
+  var inIt = !!regs[ev.id];
+  var fees = money(ev.entry_fee) + ' entry';
+  if (Number(ev.greens_fee)) fees += ' + ' + money(ev.greens_fee) + ' greens fee';
+
+  /* Every card names its discipline AND "Play Til You Win" — operator ruling
+     2026-11-12: both must appear on each card, not only in a section heading. */
+  return '<article class="spm-card q' + (inIt ? ' is-in' : '') + '">' +
+    '<div class="q-top">' +
+      '<span class="spm-badge ' + cls + '">' + esc(fmt) + '</span>' +
+      (inIt ? '<span class="spm-badge badge-in">You are in</span>' : '') +
+    '</div>' +
+    '<div>' +
+      '<p class="q-when">' + esc(fmtWhen(ev.starts_at)) + '</p>' +
+      '<h3 class="q-title">' + esc(fmt + ' Play Til You Win Singles Qualifier') + '</h3>' +
+    '</div>' +
+    '<dl class="q-meta">' +
+      (ev.venue_name ? '<dt>Where</dt><dd>' + esc(ev.venue_name) +
+        (ev.venue_address ? '<br><span style="color:var(--muted)">' + esc(ev.venue_address) + '</span>' : '') + '</dd>' : '') +
+      '<dt>Cost</dt><dd>' + esc(fees) + '</dd>' +
+      (ev.last_board_at ? '<dt>Last board</dt><dd>' + esc(pacTime(ev.last_board_at)) + '</dd>' : '') +
+      (ev.regionals_season ? '<dt>Advances to</dt><dd>' + esc(ev.regionals_season) + ' Regionals</dd>' : '') +
+    '</dl>' +
+    '<div class="q-actions">' +
+      (inIt
+        ? '<button class="spm-btn spm-btn-danger" data-cancel="' + ev.id + '">Cancel my spot</button>'
+        : '<button class="spm-btn spm-btn-primary" data-reg="' + ev.id + '">Register</button>') +
+    '</div>' +
+  '</article>';
+}
+
+/* ── Register dialog ───────────────────────────────────────────────────── */
+var dlg = document.getElementById('dlg');
+var fMn = document.getElementById('f-mn'), fFn = document.getElementById('f-fn');
+var fLn = document.getElementById('f-ln'), fEm = document.getElementById('f-em');
+var errEl = document.getElementById('dlg-err'), goBtn = document.getElementById('dlg-go');
+
+/* Digits only, hard-capped at 8 — the column's CHECK constraint is exactly 8 and
+   a shorter number is refused by the DATABASE, which previously surfaced as a
+   generic "could not save". Stop it at the keyboard instead. */
+fMn.addEventListener('input', function () {
+  var v = fMn.value.replace(/[^0-9]/g, '').slice(0, MN_DIGITS);
+  if (v !== fMn.value) fMn.value = v;
+  fMn.classList.remove('bad');
 });
 
 function openDialog(eventId) {
-  CURRENT = EVENTS.filter(function (e) { return e.id === eventId; })[0];
-  if (!CURRENT) return;
-  var me = lsGet(K_ME, {});
-  document.getElementById('f_apa').value = me.member_number || '';
-  document.getElementById('f_first').value = me.first_name || '';
-  document.getElementById('f_last').value = me.last_name || '';
-  document.getElementById('f_email').value = me.email || '';
-  document.getElementById('derr').textContent = '';
-  document.getElementById('dfor').textContent = (FMT[CURRENT.format] || CURRENT.format) + ' \u2014 ' + fmtWhen(CURRENT.starts_at);
-  document.getElementById('go').textContent = 'Register';
-  document.getElementById('go').disabled = false;
-  DLG.showModal();
+  current = eventId;
+  var ev = events.filter(function (e) { return e.id === eventId; })[0];
+  if (!ev) return;
+
+  document.getElementById('dlg-sub').textContent =
+    formatName(ev.format) + ' Play Til You Win · ' + fmtWhen(ev.starts_at);
+
+  fMn.value = me.member_number || '';
+  fFn.value = me.first_name || '';
+  fLn.value = me.last_name || '';
+  fEm.value = me.email || '';
+  errEl.textContent = '';
+  fMn.classList.remove('bad');
+  goBtn.disabled = false;
+  goBtn.textContent = 'Register';
+
+  dlg.classList.add('active');
+  (me.member_number ? goBtn : fMn).focus();
 }
-document.getElementById('cancelbtn').addEventListener('click', function () { DLG.close(); });
 
-document.getElementById('go').addEventListener('click', function () {
-  var btn = this, err = document.getElementById('derr');
-  var me = {
-    member_number: document.getElementById('f_apa').value.replace(/[^0-9]/g, ''),
-    first_name: document.getElementById('f_first').value.trim(),
-    last_name: document.getElementById('f_last').value.trim(),
-    email: document.getElementById('f_email').value.trim()
-  };
-  if (!/^[0-9]{5,9}$/.test(me.member_number)) { err.textContent = 'Please enter your APA member number (digits only).'; return; }
-  if (!me.first_name || !me.last_name) { err.textContent = 'Please enter your first and last name.'; return; }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(me.email)) { err.textContent = 'Please enter a valid email address.'; return; }
+function closeDialog() { dlg.classList.remove('active'); }
+document.getElementById('dlg-close').addEventListener('click', closeDialog);
+dlg.addEventListener('click', function (e) { if (e.target === dlg) closeDialog(); });
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && dlg.classList.contains('active')) closeDialog();
+});
 
-  lsSet(K_ME, me);                       // remembered for next time, edits included
-  btn.disabled = true; btn.textContent = 'Registering\u2026'; err.textContent = '';
+goBtn.addEventListener('click', function () {
+  var mn = fMn.value.replace(/[^0-9]/g, '');
+  var fn = fFn.value.trim(), ln = fLn.value.trim(), em = fEm.value.trim();
 
-  post({ action: 'sq_register', event_id: CURRENT.id, member_number: me.member_number,
-         first_name: me.first_name, last_name: me.last_name, email: me.email })
+  if (mn.length !== MN_DIGITS) {
+    fMn.classList.add('bad');
+    fMn.focus();
+    errEl.textContent = mn.length
+      ? 'That is ' + mn.length + ' digit' + (mn.length === 1 ? '' : 's') +
+        ' — an APA member number is ' + MN_DIGITS + '.'
+      : 'Please enter your ' + MN_DIGITS + '-digit APA member number.';
+    return;
+  }
+  if (!fn || !ln) { errEl.textContent = 'Please enter your first and last name.'; return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(em)) { errEl.textContent = 'Please enter a valid email address.'; return; }
+
+  errEl.textContent = '';
+  goBtn.disabled = true;
+  goBtn.textContent = 'Registering…';
+
+  me = { member_number: mn, first_name: fn, last_name: ln, email: em };
+  lsSet('spm-sq-me', me);
+
+  post({ action: 'sq_register', event_id: current, member_number: mn, first_name: fn, last_name: ln, email: em })
     .then(function (j) {
-      if (!j || !j.ok) throw new Error((j && j.error) || 'Could not register.');
-      var regs = lsGet(K_REGS, {}); regs[CURRENT.id] = j.token; lsSet(K_REGS, regs);
-      DLG.close(); render();
+      if (!j || !j.ok) {
+        goBtn.disabled = false;
+        goBtn.textContent = 'Register';
+        errEl.textContent = (j && j.error) || 'Something went wrong. Please try again.';
+        return;
+      }
+      regs[current] = j.token;
+      lsSet('spm-sq-regs', regs);
+      closeDialog();
+      render();
     })
-    .catch(function (e) {
-      btn.disabled = false; btn.textContent = 'Register';
-      err.textContent = e.message || 'Could not register. Please try again.';
+    .catch(function () {
+      goBtn.disabled = false;
+      goBtn.textContent = 'Register';
+      errEl.textContent = 'Could not reach the server. Please check your connection and try again.';
     });
 });
 
+/* ── Cancel ────────────────────────────────────────────────────────────── */
 function doCancel(eventId) {
-  var regs = lsGet(K_REGS, {}), token = regs[eventId];
+  var token = regs[eventId];
   if (!token) return;
-  post({ action: 'sq_cancel', token: token }).then(function (j) {
-    // A token the server rejects is stale — drop it locally either way, or the
-    // card is stuck showing "registered" forever with no way out.
-    delete regs[eventId]; lsSet(K_REGS, regs); render();
-    if (!j || !j.ok) alert('We could not confirm that cancellation. If you still get a reminder, reply to the confirmation email.');
-  }).catch(function () {
-    alert('Could not reach the server. Please try again in a moment.');
-  });
+  if (!confirm('Cancel your spot in this qualifier?')) return;
+
+  post({ action: 'sq_cancel', token: token })
+    .then(function (j) {
+      if (j && j.ok) {
+        delete regs[eventId];
+        lsSet('spm-sq-regs', regs);
+        render();
+      } else {
+        alert((j && j.error) || 'Could not cancel. Please email us.');
+      }
+    })
+    .catch(function () { alert('Could not reach the server. Please try again.'); });
 }
 
-// Cancel link arriving from the confirmation email — works on any device.
-(function handleEmailCancel() {
-  var m = location.search.match(/[?&]cancel=([^&]+)/);
-  if (!m) return;
-  var token = decodeURIComponent(m[1]);
-  history.replaceState({}, '', location.pathname);       // keep the token out of history
-  post({ action: 'sq_cancel', token: token }).then(function (j) {
-    var regs = lsGet(K_REGS, {});
-    Object.keys(regs).forEach(function (k) { if (regs[k] === token) delete regs[k]; });
-    lsSet(K_REGS, regs);
-    alert(j && j.ok ? 'You have been unregistered. A calendar update is on its way.'
-                    : 'That cancellation link is no longer valid — you may already be unregistered.');
-    render();
-  });
-})();
+/* Cancel link arriving from the confirmation email — works on any device,
+   including one that never registered. This is the real recall path. */
+function cancelFromLink() {
+  var t = new URLSearchParams(location.search).get('cancel');
+  if (!t) return Promise.resolve();
+  history.replaceState({}, '', location.pathname);        // don't re-fire on reload
+  return post({ action: 'sq_cancel', token: t }).then(function (j) {
+    if (j && j.ok) {
+      for (var k in regs) if (regs[k] === t) delete regs[k];
+      if (j.event_id) delete regs[j.event_id];
+      lsSet('spm-sq-regs', regs);
+      alert(j.already ? 'That spot was already cancelled.' : 'Your spot has been cancelled.');
+    } else {
+      alert((j && j.error) || 'That cancellation link is not valid.');
+    }
+  }).catch(function () {});
+}
 
-post({ action: 'sq_events' })
-  .then(function (j) { EVENTS = (j && j.ok && j.events) || []; render(); })
-  .catch(function () { document.getElementById('list').innerHTML = '<p class="empty">Could not load qualifiers. Please refresh.</p>'; });
+/* ── Boot ──────────────────────────────────────────────────────────────── */
+cancelFromLink().then(function () {
+  return post({ action: 'sq_events' });
+}).then(function (j) {
+  events = (j && j.ok && j.events) || [];
+  /* Drop any remembered registration whose qualifier is no longer listed, so a
+     stale localStorage entry cannot render a card for a finished event. */
+  var live = {};
+  events.forEach(function (e) { live[e.id] = 1; });
+  var changed = false;
+  for (var k in regs) if (!live[k]) { delete regs[k]; changed = true; }
+  if (changed) lsSet('spm-sq-regs', regs);
+  render();
+}).catch(function () {
+  document.getElementById('list').innerHTML =
+    '<div class="spm-card state">Could not load the qualifier list. Please refresh.</div>';
+});
+
+/* ── Stale-view guard: reload when a new version ships. No key needed — the
+      page polls its OWN version.js, which every deploy bumps. ───────────── */
+(function () {
+  var loaded = window.APP_VERSION;
+  if (!loaded) return;
+  setInterval(function () {
+    if (dlg.classList.contains('active')) return;          // never interrupt a form
+    fetch('version.js?t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.text(); })
+      .then(function (txt) {
+        var m = txt.match(/APP_VERSION\s*=\s*'([\d.]+)'/);
+        if (m && parseFloat(m[1]) > parseFloat(loaded)) {
+          document.getElementById('updating').classList.add('shown');
+          setTimeout(function () { location.reload(); }, 1200);
+        }
+      })
+      .catch(function () {});
+  }, 60000);
+})();
 </script>
 </body>
 </html>
