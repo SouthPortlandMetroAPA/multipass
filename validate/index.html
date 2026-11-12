@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MultiPass — Validation</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="../favicon.svg">
+<!--
+================================================================================
+MultiPass — validate/index.html
+================================================================================
+PURPOSE
+  Operator-facing runner for the public-contract validation suite. Click a ring
+  (or Run all) and watch each check pass, fail or skip, with the reason.
+
+WHAT IT PROVES, AND WHAT IT CANNOT
+  It drives the same public GAS contract a player's browser does. It holds NO
+  database key, so it cannot assert rows or columns directly. Structural pins —
+  "sq_* never calls authSess_", "sq_* never reads slate.players" — live in
+      node tools/claude/multipass/validate-sq-isolation.mjs
+  and CANNOT be checked from a browser. Green here is half the picture.
+
+SKIPPED IS NOT PASSED
+  A check that could not run is rendered amber and counted separately, never
+  folded into the pass count. House rule, learned the hard way.
+
+DRY RUN
+  On by default. Rings 3 and 5 write real (synthetic) rows either way; dry run
+  only suppresses the email, because the Gmail quota is ~100/day shared across
+  every app in the fleet. Turn it off to prove real delivery.
+
+NOT LINKED from the public page. Unlisted and noindex, which is obscurity, not
+access control — anything this page can do, curl can do too. The real limits are
+the server-side rate limiters.
+================================================================================
+-->
+<style>
+:root{
+  --spm-primary:#ea002a;
+  --spm-accent:#0031a1;
+  --bg:#f5f5f5;
+  --card:#ffffff;
+  --border:#e1e1e1;
+  --text:#1f1f1f;
+  --muted:#666;
+  --pass:#1a7f37;
+  --pass-bg:#e8f5ec;
+  --fail:#a02030;
+  --fail-bg:#fce8ea;
+  --skip:#8a6100;
+  --skip-bg:#fdf3e0;
+  --info:#1a3b6b;
+  --info-bg:#e8f0fe;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;width:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+
+.spm-page{width:100%;max-width:980px;margin:0 auto;padding:12px}
+@media(min-width:768px){.spm-page{padding:16px 20px}}
+
+.spm-header{border-radius:22px;padding:22px 20px 20px;color:#fff;
+  background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));
+  box-shadow:0 6px 18px rgba(0,0,0,.25);text-align:center;margin-bottom:18px}
+.spm-header h1{margin:0;font-size:clamp(1.25rem,1rem + 1.5vw,1.75rem);font-weight:900;letter-spacing:-.02em}
+.spm-header .spm-subtitle{margin:4px 0 0;font-size:clamp(1rem,.75rem + 1vw,1.2rem);font-weight:500;font-style:italic;opacity:.92}
+
+.spm-card{background:var(--card);border:1px solid var(--border);border-radius:22px;
+  padding:20px;box-shadow:0 3px 10px rgba(0,0,0,.1);margin-bottom:16px}
+
+.spm-btn{display:inline-block;border:none;border-radius:999px;padding:11px 22px;font-weight:700;
+  font-size:.95rem;cursor:pointer;min-height:44px;font-family:inherit;
+  transition:filter .15s,transform .15s}
+.spm-btn:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.spm-btn:disabled{opacity:.5;cursor:default;transform:none;filter:none}
+.spm-btn-primary{background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));color:#fff}
+.spm-btn-secondary{background:#fff;color:var(--text);border:2px solid var(--border)}
+.spm-btn-sm{padding:7px 15px;min-height:36px;font-size:.82rem}
+
+/* Controls */
+.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.toggle{display:flex;align-items:center;gap:9px;font-size:.92rem;font-weight:600;cursor:pointer;
+  padding:8px 14px;border:2px solid var(--border);border-radius:999px;background:#fff}
+.toggle input{width:18px;height:18px;accent-color:var(--spm-accent);cursor:pointer}
+
+.tally{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 0}
+.chip{padding:5px 14px;border-radius:999px;font-size:.82rem;font-weight:800;letter-spacing:.02em}
+.chip-pass{background:var(--pass-bg);color:var(--pass)}
+.chip-fail{background:var(--fail-bg);color:var(--fail)}
+.chip-skip{background:var(--skip-bg);color:var(--skip)}
+.chip-left{background:#eee;color:var(--muted)}
+
+.banner{margin:16px 0 0;padding:13px 16px;border-radius:14px;font-weight:700;font-size:.95rem}
+.banner-pass{background:var(--pass-bg);color:var(--pass);border:1px solid #b7dfc4}
+.banner-fail{background:var(--fail-bg);color:var(--fail);border:1px solid #e8a0a8}
+.banner-skip{background:var(--skip-bg);color:var(--skip);border:1px solid #e8cf9a}
+.banner small{display:block;font-weight:500;margin-top:3px;opacity:.9}
+
+/* Rings */
+.ring-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:6px}
+.ring-title{margin:0;font-size:1.05rem;font-weight:800}
+.ring-n{display:inline-block;min-width:26px;height:26px;line-height:26px;text-align:center;
+  border-radius:50%;background:var(--spm-accent);color:#fff;font-size:.8rem;font-weight:800;margin-right:8px}
+.ring-intent{margin:0 0 14px;color:var(--muted);font-size:.9rem}
+.ring-writes{display:inline-block;margin-left:8px;padding:2px 9px;border-radius:999px;
+  background:var(--skip-bg);color:var(--skip);font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+
+.t{border-top:1px solid var(--border);padding:12px 0}
+.t:first-of-type{border-top:none}
+.t-head{display:flex;gap:11px;align-items:flex-start}
+.t-id{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.82rem;font-weight:700;min-width:30px;padding-top:2px}
+.t-body{flex:1;min-width:0}
+.t-name{font-weight:700;font-size:.96rem}
+.t-why{margin:3px 0 0;color:var(--muted);font-size:.85rem;line-height:1.45}
+.t-detail{margin:8px 0 0;padding:9px 12px;border-radius:10px;background:#f7f7f8;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem;
+  white-space:pre-wrap;overflow-wrap:anywhere;color:#333}
+.t-status{flex:0 0 auto;padding-top:1px}
+
+.st{display:inline-block;padding:4px 11px;border-radius:999px;font-size:.72rem;font-weight:800;
+  text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.st-idle{background:#eee;color:#777}
+.st-run{background:var(--info-bg);color:var(--info)}
+.st-pass{background:var(--pass-bg);color:var(--pass)}
+.st-fail{background:var(--fail-bg);color:var(--fail)}
+.st-skip{background:var(--skip-bg);color:var(--skip)}
+.st-mut{background:var(--info-bg);color:var(--info)}
+
+.t.row-fail{background:#fff8f9;margin:0 -10px;padding-left:10px;padding-right:10px;border-radius:10px}
+.t.row-skip{background:#fffcf5;margin:0 -10px;padding-left:10px;padding-right:10px;border-radius:10px}
+
+.note{margin:14px 0 0;padding-top:12px;border-top:1px solid var(--border);
+  font-size:.85rem;color:var(--muted);line-height:1.5}
+.note code{background:#f0f0f2;padding:1px 6px;border-radius:5px;font-size:.92em}
+.spm-footer{text-align:center;font-size:.8rem;color:var(--muted);padding:20px 0 16px}
+</style>
+</head>
+<body>
+<div class="spm-page">
+
+  <header class="spm-header">
+    <h1>MultiPass Validation</h1>
+    <p class="spm-subtitle">basic functional, spiralling out</p>
+  </header>
+
+  <div class="spm-card">
+    <div class="controls">
+      <button class="spm-btn spm-btn-primary" id="run-all">Run all rings</button>
+      <button class="spm-btn spm-btn-secondary" id="reset">Reset</button>
+      <label class="toggle" title="Rings 3 and 5 write synthetic rows either way; this only suppresses the email.">
+        <input type="checkbox" id="dry" checked>
+        <span>Dry run — write rows, send no email</span>
+      </label>
+      <label class="toggle" title="5.5 fires eight registrations in a row to trip the limiter.">
+        <input type="checkbox" id="slow">
+        <span>Include slow checks</span>
+      </label>
+    </div>
+
+    <div class="tally" id="tally"></div>
+    <div id="verdict"></div>
+
+    <p class="note">
+      <strong>This page tests the public contract only.</strong> It holds no database key, so it
+      asserts what the API returns, not what the table contains. The structural pins — that the open
+      path never calls <code>authSess_</code> and never reads <code>slate.players</code> — can only be
+      checked on a machine with the repo:
+      <code>node tools/claude/multipass/validate-sq-isolation.mjs</code>.
+      Green here is half the picture.
+    </p>
+  </div>
+
+  <div id="rings"></div>
+
+  <p class="spm-footer">South Portland Metro APA · operator tool, not linked from the public page</p>
+</div>
+
+<script src="tests.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var S = window.SQ_SUITE;
+  var ringsHost = document.getElementById('rings');
+  var dryEl = document.getElementById('dry');
+  var slowEl = document.getElementById('slow');
+  var runAllBtn = document.getElementById('run-all');
+
+  /* Shared context: Ring 0 discovers the live event id and stashes it here,
+     Ring 3 puts its token here, Ring 5 collects tokens to cancel. */
+  function freshCtx() {
+    return { events: [], liveEventId: null, member: S.freshMember(), token: null, token2: null,
+             cleanup: [], dryRun: dryEl.checked };
+  }
+  var ctx = freshCtx();
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  /* ── Build the page from the suite definition ───────────────────────── */
+  var nodes = {};   // test id -> { row, status, detail }
+
+  S.rings.forEach(function (ring) {
+    var card = el('div', 'spm-card');
+
+    var head = el('div', 'ring-head');
+    var h = el('h2', 'ring-title');
+    var badge = el('span', 'ring-n', String(ring.n));
+    h.appendChild(badge);
+    h.appendChild(document.createTextNode(ring.name));
+    if (ring.writes) h.appendChild(el('span', 'ring-writes', 'writes rows'));
+    head.appendChild(h);
+
+    var btn = el('button', 'spm-btn spm-btn-secondary spm-btn-sm', 'Run ring ' + ring.n);
+    btn.addEventListener('click', function () { runRings([ring]); });
+    head.appendChild(btn);
+    card.appendChild(head);
+
+    card.appendChild(el('p', 'ring-intent', ring.intent));
+
+    ring.tests.forEach(function (t) {
+      var row = el('div', 't');
+      var top = el('div', 't-head');
+
+      top.appendChild(el('div', 't-id', t.id));
+
+      var body = el('div', 't-body');
+      body.appendChild(el('div', 't-name', t.name + (t.slow ? '  (slow)' : '')));
+      body.appendChild(el('p', 't-why', t.why));
+      var detail = el('pre', 't-detail');
+      detail.style.display = 'none';
+      body.appendChild(detail);
+      top.appendChild(body);
+
+      var status = el('div', 't-status');
+      var pill = el('span', 'st st-idle', 'not run');
+      status.appendChild(pill);
+      top.appendChild(status);
+
+      row.appendChild(top);
+      card.appendChild(row);
+      nodes[t.id] = { row: row, pill: pill, detail: detail };
+    });
+
+    ringsHost.appendChild(card);
+  });
+
+  /* ── Status rendering ───────────────────────────────────────────────── */
+  function setStatus(id, kind, label, detail) {
+    var n = nodes[id];
+    if (!n) return;
+    n.pill.className = 'st st-' + kind;
+    n.pill.textContent = label;
+    n.row.className = 't' + (kind === 'fail' ? ' row-fail' : kind === 'skip' ? ' row-skip' : '');
+    if (detail) { n.detail.textContent = detail; n.detail.style.display = ''; }
+    else { n.detail.style.display = 'none'; }
+  }
+
+  var counts = { pass: 0, fail: 0, skip: 0, total: 0 };
+
+  function resetCounts() {
+    counts = { pass: 0, fail: 0, skip: 0, total: 0 };
+    S.rings.forEach(function (r) { counts.total += r.tests.length; });
+  }
+
+  function paintTally() {
+    var left = counts.total - counts.pass - counts.fail - counts.skip;
+    var t = document.getElementById('tally');
+    t.innerHTML = '';
+    t.appendChild(el('span', 'chip chip-pass', counts.pass + ' passed'));
+    t.appendChild(el('span', 'chip chip-fail', counts.fail + ' failed'));
+    t.appendChild(el('span', 'chip chip-skip', counts.skip + ' skipped'));
+    t.appendChild(el('span', 'chip chip-left', left + ' not run'));
+  }
+
+  function paintVerdict(done) {
+    var v = document.getElementById('verdict');
+    v.innerHTML = '';
+    if (!done) return;
+    var b;
+    if (counts.fail > 0) {
+      b = el('div', 'banner banner-fail', counts.fail + ' check' + (counts.fail === 1 ? '' : 's') + ' failed.');
+      b.appendChild(el('small', null, 'Fix these before telling players the page is ready.'));
+    } else if (counts.skip > 0) {
+      b = el('div', 'banner banner-skip', 'No failures, but ' + counts.skip + ' check' + (counts.skip === 1 ? '' : 's') + ' could not run.');
+      b.appendChild(el('small', null, 'A skipped check is NOT a passing check — read each reason before trusting this run.'));
+    } else {
+      b = el('div', 'banner banner-pass', 'All ' + counts.pass + ' checks passed.');
+      b.appendChild(el('small', null, 'Public contract only. Run validate-sq-isolation.mjs for the structural pins.'));
+    }
+    v.appendChild(b);
+  }
+
+  /* ── Runner ─────────────────────────────────────────────────────────── */
+  function runOne(ring, t) {
+    if (t.slow && !slowEl.checked) {
+      counts.skip++;
+      setStatus(t.id, 'skip', 'skipped', 'Slow check — enable "Include slow checks" to run it.');
+      paintTally();
+      return Promise.resolve();
+    }
+    /* Rings 2-5 all need a live event discovered by Ring 0. Saying so beats a
+       cascade of confusing failures that look like real defects. */
+    if (ring.n >= 2 && !ctx.liveEventId) {
+      counts.skip++;
+      setStatus(t.id, 'skip', 'skipped', 'No live qualifier available — Ring 0 found none to test against.');
+      paintTally();
+      return Promise.resolve();
+    }
+
+    setStatus(t.id, 'run', 'running…');
+    ctx.dryRun = dryEl.checked;
+
+    return Promise.resolve()
+      .then(function () { return t.run(ctx); })
+      .then(function (res) {
+        res = res || {};
+        if (res.skip) {
+          counts.skip++;
+          setStatus(t.id, 'skip', 'skipped', res.skip);
+          return;
+        }
+        /* The mutation check asserts something known false. Red here is the
+           correct outcome and proves the runner can report red at all. */
+        if (t.inverted) {
+          if (res.ok) {
+            counts.fail++;
+            setStatus(t.id, 'fail', 'runner broken', 'This check must FAIL. It passed, so the runner is not evaluating results.');
+          } else {
+            counts.pass++;
+            setStatus(t.id, 'mut', 'red as designed', res.detail);
+          }
+          return;
+        }
+        if (res.ok) { counts.pass++; setStatus(t.id, 'pass', 'pass', res.detail); }
+        else { counts.fail++; setStatus(t.id, 'fail', 'fail', res.detail); }
+      })
+      .catch(function (e) {
+        counts.fail++;
+        setStatus(t.id, 'fail', 'error', String((e && e.message) || e));
+      })
+      .then(paintTally);
+  }
+
+  function runRings(list) {
+    runAllBtn.disabled = true;
+    /* Ring 0 seeds the context every run, whichever ring the operator clicked,
+       otherwise a lone Ring 3 run has no event to register against. */
+    var needsBoot = list.some(function (r) { return r.n >= 2; }) && !ctx.liveEventId;
+    var boot = needsBoot ? S.rings[0] : null;
+    var seq = (boot && list.indexOf(boot) < 0 ? [boot] : []).concat(list);
+
+    var chain = Promise.resolve();
+    seq.forEach(function (ring) {
+      ring.tests.forEach(function (t) {
+        chain = chain.then(function () { return runOne(ring, t); });
+      });
+    });
+    return chain.then(function () {
+      paintVerdict(true);
+      runAllBtn.disabled = false;
+    });
+  }
+
+  runAllBtn.addEventListener('click', function () {
+    ctx = freshCtx();
+    resetCounts();
+    Object.keys(nodes).forEach(function (id) { setStatus(id, 'idle', 'not run', ''); });
+    paintTally();
+    paintVerdict(false);
+    runRings(S.rings);
+  });
+
+  document.getElementById('reset').addEventListener('click', function () {
+    ctx = freshCtx();
+    resetCounts();
+    Object.keys(nodes).forEach(function (id) { setStatus(id, 'idle', 'not run', ''); });
+    paintTally();
+    paintVerdict(false);
+  });
+
+  resetCounts();
+  paintTally();
+})();
+</script>
+</body>
+</html>
