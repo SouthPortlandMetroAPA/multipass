@@ -125,6 +125,14 @@ html,body{margin:0;padding:0;width:100%;background:var(--bg);color:var(--text);
 .q-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:auto}
 .q-actions .spm-btn{flex:1 1 auto}
 
+/* Eligibility requirement. Deliberately loud: it is the single thing that most
+   often turns someone away at the door, and it was previously only mentioned
+   in the confirmation email, i.e. after they had already signed up. */
+.q-req{margin:0;padding:11px 13px;border-radius:12px;background:#fdf3e0;
+  border:1px solid #e8cf9a;border-left:5px solid #c98a00;color:#7a5500;
+  font-size:.88rem;font-weight:600;line-height:1.45}
+.q-req b{font-weight:800;color:#5e4200}
+
 .q.is-in{border-color:var(--ok-border);background:var(--ok-bg)}
 .badge-in{background:var(--ok-text);color:#fff}
 
@@ -380,6 +388,11 @@ function card(ev) {
       (ev.last_board_at ? '<dt>Last board</dt><dd>' + esc(pacTime(ev.last_board_at)) + '</dd>' : '') +
       (ev.regionals_season ? '<dt>Advances to</dt><dd>' + esc(ev.regionals_season) + ' Regionals</dd>' : '') +
     '</dl>' +
+    /* Named per card and per discipline, not once at the top of the page: the
+       number is the same but the FORMAT is not, and a player scrolling to the
+       9-Ball weekend should not have to remember a line from the 8-Ball one. */
+    '<p class="q-req">You need at least <b>10 ' + esc(fmt) + ' league match scores</b> ' +
+      'in the last two years to play this one.</p>' +
     '<div class="q-actions">' +
       (inIt
         ? '<button class="spm-btn spm-btn-danger" data-cancel="' + ev.id + '">Cancel my spot</button>'
