@@ -622,6 +622,13 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
          cycles unset → eligible → ineligible → unset. */
       var now = eligState(r);
       var next = now === 'eligible' ? 'ineligible' : now === 'ineligible' ? '' : 'eligible';
+      /* Setting a decision emails the player; clearing it does not, because
+         clearing is an internal correction, not news. */
+      confirmText = next === 'eligible'
+        ? 'Mark ' + (r.first_name || 'them') + ' eligible? This emails them.'
+        : next === 'ineligible'
+        ? 'Mark ' + (r.first_name || 'them') + ' NOT eligible? This emails them.'
+        : null;
       call = { action: 'sqa_eligible', member_number: r.member_number,
                format: ev && ev.format, regionals_season: (ev && ev.regionals_season) || '',
                state: next };
