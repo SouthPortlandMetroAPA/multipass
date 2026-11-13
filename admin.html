@@ -1,3072 +1,852 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <!--
-  ============================================================================
-  MultiPass - admin.html (Standalone / GitHub Pages version)
-  ============================================================================
-
-  PURPOSE:
-    Standalone admin dashboard for MultiPass. Replaces the GAS-served
-    Admin.html with a fetch()-based version that runs on GitHub Pages.
-    All API calls go through the Cloudflare Worker CORS proxy.
-
-  AUTHENTICATION:
-    Admin token is read from the URL query parameter: ?admin=<token>
-    If missing or empty, the page shows an error and blocks all UI.
-    The token is passed to every API call as `adminToken`.
-
-  ARCHITECTURE:
-    Standalone build — NO dependency on Google Apps Script runtime.
-    Uses fetch() POST to Cloudflare Worker (multipass.spmapa.workers.dev)
-    which proxies to the GAS doPost endpoint. JSON request/response.
-
-    callServer(action, params) builds the fetch request. The action
-    maps to Api.js doPost routes. Admin token is auto-injected.
-
-  TABS:
-    1. Registrations (default) — event selector, registration table,
-       payment toggles, eligibility circles, cancel, refresh, CSV export
-    2. Qualifiers — maintenance mode toggle, add/edit/delete qualifiers
-
-  RESPONSIVE:
-    STANDALONE approach (NOT GAS iframe):
-    - 16px base font (not 36px)
-    - CSS @media queries for breakpoints (not JS screen.width)
-    - mobile < 768px, tablet 768-1199px, desktop >= 1200px
-    - No zoom hacks, no transform scaling
-
-  BRANDING:
-    Same APA visual identity as all family apps:
-    - --spm-primary: #ea002a (red), --spm-accent: #0031a1 (blue)
-    - Header gradient, 22px radius cards, gradient buttons
-    - system-ui font stack
-
-  MAINTENANCE MODE:
-    This admin page is NOT affected by maintenance mode.
-    Maintenance only gates the player-facing site (index.html).
-
-  ============================================================================
-  -->
-  <title>MultiPass Admin — South Portland Metro APA</title>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    /* ======================================================================
-       CSS - Standalone Admin Dashboard
-       ======================================================================
-       16px base font. CSS @media queries for responsive breakpoints.
-       Mobile-first: base styles are mobile, min-width queries add
-       tablet/desktop overrides.
-       ====================================================================== */
-
-    :root {
-      /* -- APA branding colors -- */
-      --spm-primary: #ea002a;
-      --spm-accent: #0031a1;
-
-      /* -- Neutral palette -- */
-      --bg: #f5f5f5;
-      --card: #ffffff;
-      --border: #e1e1e1;
-      --text: #1f1f1f;
-      --muted: #888;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    html, body {
-      width: 100%;
-      background: var(--bg);
-      color: var(--text);
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 16px;
-      line-height: 1.5;
-    }
-
-    /* -- Page wrapper -- */
-    .page {
-      width: 100%;
-      max-width: 100vw;
-      padding: 12px;
-    }
-
-    /* -- Header (gradient card, branded) -- */
-    header {
-      border-radius: 22px;
-      padding: 16px 16px 14px;
-      color: #fff;
-      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-      text-align: center;
-      margin-bottom: 12px;
-    }
-
-    .title {
-      font-size: clamp(1.25rem, 1rem + 1vw, 1.75rem);
-      font-weight: 900;
-      line-height: 1.1;
-    }
-
-    .subtitle-group {
-      display: inline-block;
-      margin-top: 4px;
-    }
-
-    .subtitle {
-      font-size: clamp(1.5rem, 1.25rem + 1.25vw, 2.25rem);
-      font-weight: 400;
-      font-style: italic;
-      opacity: 0.95;
-    }
-
-    .admin-pill {
-      display: block;
-      width: 100%;
-      margin-top: 6px;
-      padding: 6px 16px;
-      border-radius: 999px;
-      font-size: 0.75rem;
-      font-weight: 800;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      background: rgba(255, 255, 255, 0.25);
-      color: #fff;
-      border: 2px solid rgba(255, 255, 255, 0.7);
-    }
-
-    .header-status {
-      margin: 6px 0 0;
-      font-size: 0.875rem;
-      opacity: 0.9;
-      min-height: 1.3em;
-    }
-
-    /* -- Auth error page -- */
-    .auth-error {
-      text-align: center;
-      padding: 48px 24px;
-    }
-    .auth-error-icon {
-      font-size: 3rem;
-      margin-bottom: 16px;
-    }
-    .auth-error-title {
-      font-size: 1.25rem;
-      font-weight: 800;
-      margin-bottom: 8px;
-    }
-    .auth-error-msg {
-      font-size: 0.9375rem;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-
-    /* -- Toolbar (refresh + export) -- */
-    .admin-toolbar {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .admin-toolbar-btn {
-      flex: 1;
-      padding: 10px 0;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      background: var(--card);
-      color: var(--text);
-      font-size: 0.875rem;
-      font-weight: 700;
-      font-family: inherit;
-      cursor: pointer;
-      transition: background 0.15s;
-      min-height: 44px;
-    }
-
-    .admin-toolbar-btn:hover {
-      background: var(--bg);
-    }
-
-    .admin-toolbar-btn:active {
-      background: #e0e0e0;
-    }
-
-    .admin-toolbar-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    /* -- Tab toggle pills -- */
-    .tab-toggle {
-      display: flex;
-      gap: 0;
-      margin-bottom: 12px;
-      background: var(--bg);
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      overflow: hidden;
-    }
-
-    .tab-pill {
-      flex: 1;
-      padding: 10px 0;
-      border: none;
-      background: transparent;
-      color: var(--muted);
-      font-size: 0.875rem;
-      font-weight: 700;
-      font-family: inherit;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s;
-      text-align: center;
-      min-height: 44px;
-    }
-
-    .tab-pill.active {
-      background: var(--spm-accent);
-      color: #fff;
-    }
-
-    /* -- Event selector card -- */
-    .event-selector-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      padding: 16px;
-      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-      margin-bottom: 12px;
-    }
-
-    .event-selector-label {
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 8px;
-    }
-
-    .event-selector {
-      width: 100%;
-      padding: 10px 36px 10px 12px;
-      font-size: 0.9375rem;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: var(--bg);
-      font-family: inherit;
-      outline: none;
-      cursor: pointer;
-      -webkit-appearance: none;
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23888'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 12px center;
-      background-size: 20px;
-      min-height: 44px;
-    }
-
-    .event-selector:focus {
-      border-color: var(--spm-accent);
-      box-shadow: 0 0 0 3px rgba(0, 49, 161, 0.15);
-    }
-
-    /* -- Total summary bar -- */
-    .admin-total-bar {
-      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
-      color: #fff;
-      border-radius: 22px;
-      padding: 10px 16px;
-      font-size: 0.875rem;
-      font-weight: 700;
-      text-align: center;
-      margin-bottom: 12px;
-    }
-
-    /* -- Event details banner -- */
-    .event-details-banner {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      padding: 12px 16px;
-      margin-bottom: 12px;
-      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
-    }
-
-    .event-detail-row {
-      font-size: 0.875rem;
-      line-height: 1.5;
-    }
-
-    .event-detail-row:first-child {
-      font-size: 0.9375rem;
-      margin-bottom: 4px;
-    }
-
-    .event-detail-address {
-      color: var(--muted);
-      font-size: 0.8125rem;
-    }
-
-    /* -- Registration table -- */
-    .reg-table-wrap {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-      overflow: hidden;
-      margin-bottom: 12px;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .reg-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.8125rem;
-      min-width: 580px;
-    }
-
-    .reg-table th {
-      background: var(--bg);
-      font-size: 0.6875rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      padding: 8px 6px;
-      text-align: left;
-      border-bottom: 2px solid var(--border);
-      white-space: nowrap;
-    }
-
-    /* -- Sortable column headers -- */
-    /* Clickable headers show a pointer cursor and a sort-direction arrow.
-       Ascending = ▲, descending = ▼. Inactive sortable headers show a
-       subtle ⇅ hint on hover. */
-    .reg-table th.sortable {
-      cursor: pointer;
-      user-select: none;
-      position: relative;
-      padding-right: 18px;
-    }
-    .reg-table th.sortable:hover {
-      color: var(--text);
-    }
-    .reg-table th.sortable::after {
-      content: '⇅';
-      position: absolute;
-      right: 4px;
-      opacity: 0.3;
-      font-size: 0.6rem;
-    }
-    .reg-table th.sortable.sort-asc::after {
-      content: '▲';
-      opacity: 0.8;
-    }
-    .reg-table th.sortable.sort-desc::after {
-      content: '▼';
-      opacity: 0.8;
-    }
-
-    .reg-table td {
-      padding: 8px 6px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: middle;
-    }
-
-    .reg-table tr:last-child td {
-      border-bottom: none;
-    }
-
-    .reg-table .sl-cell {
-      text-align: center;
-      font-weight: 700;
-    }
-
-    /* -- Inline payment method buttons (Cash / CashApp / Venmo / PayPal) -- */
-    /* Each registration row shows 4 small pill buttons. The active method
-       is green; the rest are gray. Clicking a gray button marks paid with
-       that method. Clicking the active (green) button undoes the payment. */
-    .pay-btns {
-      display: flex;
-      gap: 4px;
-      flex-wrap: nowrap;
-    }
-
-    .pay-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: none;
-      font-size: 0.625rem;
-      font-weight: 800;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      cursor: pointer;
-      font-family: inherit;
-      transition: background 0.2s, color 0.2s;
-      white-space: nowrap;
-      min-height: 32px;
-      min-width: 44px;
-      background: #e9ecef;
-      color: #6c757d;
-    }
-
-    .pay-btn.active {
-      background: #28a745;
-      color: #fff;
-    }
-
-    .pay-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    /* -- Filter bar (All / Unpaid / Paid / Qualified) -- */
-    .filter-bar {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    .filter-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 6px 16px;
-      border-radius: 999px;
-      border: 1px solid #dee2e6;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-      cursor: pointer;
-      font-family: inherit;
-      background: #fff;
-      color: #6c757d;
-      min-height: 36px;
-      transition: background 0.15s, color 0.15s, border-color 0.15s;
-    }
-    .filter-btn:hover {
-      border-color: #adb5bd;
-      background: #f8f9fa;
-    }
-    .filter-btn.active {
-      background: var(--spm-accent, #0031a1);
-      color: #fff;
-      border-color: var(--spm-accent, #0031a1);
-    }
-
-    /* -- Payment Summary Box -- */
-    .payment-summary {
-      background: #f8f9fa;
-      border: 1px solid #dee2e6;
-      border-radius: 12px;
-      padding: 16px 20px;
-      margin-bottom: 16px;
-    }
-    .payment-summary-title {
-      font-weight: 700;
-      font-size: 0.85rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #495057;
-      margin-bottom: 8px;
-    }
-    .payment-summary-fees {
-      font-size: 0.8rem;
-      color: #6c757d;
-      margin-bottom: 12px;
-    }
-    .payment-summary-stack {
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-      margin-bottom: 12px;
-    }
-    .payment-summary-method {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.8rem;
-      padding: 6px 0;
-      border-bottom: 1px solid #e9ecef;
-    }
-    .payment-summary-method:last-child {
-      border-bottom: none;
-    }
-    .payment-summary-label {
-      color: #495057;
-      font-weight: 600;
-    }
-    .payment-summary-value {
-      color: #6c757d;
-    }
-    .payment-summary-totals {
-      border-top: 2px solid #dee2e6;
-      padding-top: 8px;
-    }
-    .payment-summary-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.85rem;
-      padding: 4px 0;
-    }
-    .payment-summary-row strong {
-      color: #495057;
-    }
-    .payment-summary-grand {
-      font-size: 0.95rem;
-      padding: 8px 0 4px;
-      border-top: 1px solid #dee2e6;
-      margin-top: 4px;
-    }
-    .payment-summary-grand strong {
-      color: #28a745;
-    }
-    .payment-summary-unpaid strong {
-      color: #dc3545;
-    }
-
-    /* Legacy paid (prePaid=yes but no method recorded) — amber outline
-       signals "paid under old system, tap the correct method to assign".
-       PaymentMethod is now the source of truth for paid status; these rows
-       need a method assigned to be fully migrated. */
-    .pay-btns.legacy-paid .pay-btn {
-      background: #fff3cd;
-      color: #856404;
-      border: 1px solid #ffc107;
-    }
-
-    /* -- Eligibility circle buttons -- */
-    .elig-circles {
-      display: flex;
-      gap: 4px;
-      justify-content: center;
-      align-items: center;
-    }
-    .elig-circle {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      border: 2px solid transparent;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-      font-weight: 700;
-      color: #fff;
-      transition: opacity 0.15s, transform 0.15s;
-      padding: 0;
-      font-family: inherit;
-      line-height: 1;
-    }
-    .elig-circle:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-    .elig-circle.elig-active {
-      transform: scale(1.15);
-      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-    }
-    .elig-circle:not(.elig-active) {
-      opacity: 0.3;
-    }
-    .elig-circle:not(.elig-active):hover:not(:disabled) {
-      opacity: 0.7;
-    }
-    .elig-circle-yes   { background: #28a745; }
-    .elig-circle-no    { background: #dc3545; }
-    .elig-circle-maybe { background: #999; }
-
-    /* -- Singles Regionals toggle button -- */
-    /* Simple yes/no toggle: gray when not qualified, gold when qualified. */
-    .singles-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 44px;
-      min-height: 32px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      border: none;
-      font-size: 0.625rem;
-      font-weight: 800;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      cursor: pointer;
-      font-family: inherit;
-      transition: background 0.2s, color 0.2s;
-      background: #e9ecef;
-      color: #6c757d;
-    }
-    .singles-btn.active {
-      background: #f59e0b;
-      color: #fff;
-    }
-    .singles-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    /* -- Eligibility queue toast -- */
-    .elig-queue-toast {
-      display: none;
-      position: fixed;
-      bottom: 16px;
-      right: 16px;
-      background: #1e40af;
-      color: #fff;
-      padding: 8px 16px;
-      border-radius: 8px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      z-index: 9999;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-    }
-    .elig-queue-toast.retrying {
-      background: #b45309;
-    }
-
-    /* -- Cancel registration button -- */
-    .cancel-reg-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      border: 1px solid #dc3545;
-      background: transparent;
-      color: #dc3545;
-      font-size: 0.75rem;
-      font-weight: 700;
-      cursor: pointer;
-      font-family: inherit;
-      transition: background 0.2s, color 0.2s;
-    }
-
-    .cancel-reg-btn:hover {
-      background: #dc3545;
-      color: #fff;
-    }
-
-    .cancel-reg-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    /* -- Empty state -- */
-    .admin-empty {
-      text-align: center;
-      padding: 24px 16px;
-      color: var(--muted);
-      font-size: 0.9375rem;
-      font-style: italic;
-    }
-
-    /* -- Loading text -- */
-    .loading-text {
-      text-align: center;
-      color: var(--muted);
-      font-size: 0.9375rem;
-      padding: 32px 16px;
-    }
-
-    /* -- Footer -- */
-    .footer {
-      text-align: center;
-      font-size: 0.75rem;
-      color: var(--muted);
-      margin: 24px 0 12px;
-    }
-
-    /* -- Modal overlay -- */
-    .modal {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.58);
-      z-index: 1000;
-      justify-content: center;
-      align-items: center;
-      padding: 16px;
-    }
-
-    .modal-panel {
-      background: #fff;
-      border-radius: 16px;
-      padding: 24px 20px 20px;
-      width: 100%;
-      max-width: 400px;
-      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
-      text-align: center;
-    }
-
-    .modal-title {
-      font-size: 1.125rem;
-      font-weight: 800;
-      color: var(--text);
-      margin-bottom: 8px;
-    }
-
-    .modal-message {
-      font-size: 0.9375rem;
-      line-height: 1.5;
-      margin-bottom: 20px;
-      color: #555;
-      white-space: pre-line;
-    }
-
-    .modal-actions {
-      display: flex;
-      gap: 8px;
-    }
-
-    .modal-btn {
-      flex: 1;
-      padding: 12px 0;
-      font-size: 0.9375rem;
-      font-weight: 700;
-      border: none;
-      border-radius: 999px;
-      cursor: pointer;
-      font-family: inherit;
-      transition: opacity 0.15s;
-      min-height: 48px;
-    }
-
-    .modal-btn:active {
-      opacity: 0.82;
-    }
-
-    .modal-btn-confirm {
-      background: var(--spm-primary);
-      color: #fff;
-    }
-
-    .modal-btn-dismiss {
-      background: var(--bg);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-
-    /* Payment method modal grid REMOVED — replaced by inline .pay-btns
-       in each registration row. See .pay-btns / .pay-btn above. */
-
-    /* -- Maintenance mode card -- */
-    .maintenance-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      padding: 16px;
-      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-      margin-bottom: 12px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .maintenance-label {
-      font-size: 0.9375rem;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-    }
-
-    .maintenance-label input[type="checkbox"] {
-      width: 20px;
-      height: 20px;
-      cursor: pointer;
-    }
-
-    .bypass-key {
-      font-size: 0.8125rem;
-      font-weight: 600;
-      color: var(--spm-accent);
-      background: #e8edff;
-      padding: 4px 12px;
-      border-radius: 999px;
-      white-space: nowrap;
-    }
-
-    /* -- Add Qualifier button -- */
-    .add-qualifier-btn {
-      display: block;
-      width: 100%;
-      padding: 12px 0;
-      border: none;
-      border-radius: 999px;
-      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
-      color: #fff;
-      font-size: 0.9375rem;
-      font-weight: 800;
-      font-family: inherit;
-      cursor: pointer;
-      margin-bottom: 12px;
-      transition: opacity 0.15s;
-      text-align: center;
-      min-height: 48px;
-    }
-
-    .add-qualifier-btn:active {
-      opacity: 0.82;
-    }
-
-    /* -- Qualifier cards -- */
-    /* ── Qualifier Time-Window Tabs ──────────────────────────────── */
-    .qual-filter-tabs {
-      display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px;
-    }
-    .qual-filter-tab {
-      background: var(--card); border: 1px solid var(--border); border-radius: 999px;
-      padding: 6px 14px; font-size: 0.8rem; font-weight: 600; cursor: pointer;
-      min-height: 36px; transition: all 0.1s; font-family: inherit;
-    }
-    .qual-filter-tab.active {
-      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
-      color: #fff; border-color: transparent;
-    }
-
-    .qualifier-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      padding: 16px;
-      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-      margin-bottom: 12px;
-    }
-    .qualifier-card.past {
-      opacity: 0.7; border-left: 4px solid var(--muted);
-    }
-
-    .qualifier-card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .qualifier-card-date {
-      font-size: 1rem;
-      font-weight: 800;
-    }
-
-    .format-badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 999px;
-      font-size: 0.6875rem;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: #fff;
-      white-space: nowrap;
-    }
-
-    .format-badge.fmt-8 {
-      background: var(--spm-primary);
-    }
-
-    .format-badge.fmt-9 {
-      background: var(--spm-accent);
-    }
-
-    .qualifier-card-detail {
-      font-size: 0.8125rem;
-      line-height: 1.6;
-      color: #555;
-    }
-
-    .qualifier-card-detail strong {
-      color: var(--text);
-    }
-
-    .qualifier-card-actions {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
-    }
-
-    .qual-edit-btn {
-      flex: 1;
-      padding: 8px 0;
-      border: 2px solid var(--spm-accent);
-      border-radius: 999px;
-      background: transparent;
-      color: var(--spm-accent);
-      font-size: 0.8125rem;
-      font-weight: 700;
-      font-family: inherit;
-      cursor: pointer;
-      transition: background 0.15s, color 0.15s;
-      text-align: center;
-      min-height: 44px;
-    }
-
-    .qual-edit-btn:hover {
-      background: var(--spm-accent);
-      color: #fff;
-    }
-
-    .qual-delete-btn {
-      flex: 1;
-      padding: 8px 0;
-      border: 2px solid #dc3545;
-      border-radius: 999px;
-      background: transparent;
-      color: #dc3545;
-      font-size: 0.8125rem;
-      font-weight: 700;
-      font-family: inherit;
-      cursor: pointer;
-      transition: background 0.15s, color 0.15s;
-      text-align: center;
-      min-height: 44px;
-    }
-
-    .qual-delete-btn:hover:not(:disabled) {
-      background: #dc3545;
-      color: #fff;
-    }
-
-    .qual-delete-btn:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-
-    /* -- Qualifier modal form -- */
-    .qual-form-group {
-      margin-bottom: 12px;
-      text-align: left;
-    }
-
-    .qual-form-label {
-      display: block;
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 4px;
-    }
-
-    .qual-form-input {
-      width: 100%;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      font-size: 0.9375rem;
-      font-family: inherit;
-      background: var(--bg);
-      outline: none;
-      box-sizing: border-box;
-      min-height: 44px;
-    }
-
-    .qual-form-input:focus {
-      border-color: var(--spm-accent);
-      box-shadow: 0 0 0 3px rgba(0, 49, 161, 0.15);
-    }
-
-    .format-toggle {
-      display: flex;
-      gap: 8px;
-    }
-
-    .format-toggle-btn {
-      flex: 1;
-      padding: 10px 0;
-      border: 2px solid var(--border);
-      border-radius: 999px;
-      background: var(--card);
-      color: var(--text);
-      font-size: 0.875rem;
-      font-weight: 700;
-      font-family: inherit;
-      cursor: pointer;
-      transition: background 0.2s, border-color 0.2s, color 0.2s;
-      text-align: center;
-      min-height: 44px;
-    }
-
-    .format-toggle-btn.active-8 {
-      background: var(--spm-primary);
-      border-color: var(--spm-primary);
-      color: #fff;
-    }
-
-    .format-toggle-btn.active-9 {
-      background: var(--spm-accent);
-      border-color: var(--spm-accent);
-      color: #fff;
-    }
-
-    .qual-save-btn {
-      flex: 1;
-      padding: 12px 0;
-      border: none;
-      border-radius: 999px;
-      background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
-      color: #fff;
-      font-size: 0.9375rem;
-      font-weight: 700;
-      font-family: inherit;
-      cursor: pointer;
-      transition: opacity 0.15s;
-      min-height: 48px;
-    }
-
-    .qual-save-btn:active {
-      opacity: 0.82;
-    }
-
-
-    /* ======================================================================
-       Tablet Overrides (min-width: 768px)
-       ====================================================================== */
-    @media (min-width: 768px) {
-      .page {
-        max-width: 700px;
-        margin: 0 auto;
-        padding: 16px;
-      }
-
-      header {
-        padding: 20px 20px 16px;
-      }
-
-      .admin-toolbar {
-        max-width: 400px;
-        margin: 0 auto 12px;
-      }
-    }
-
-
-    /* ======================================================================
-       Desktop Overrides (min-width: 1200px)
-       ====================================================================== */
-    @media (min-width: 1200px) {
-      .page {
-        max-width: 900px;
-      }
-
-      header {
-        border-radius: 14px;
-        padding: 14px 16px 12px;
-        margin-bottom: 12px;
-      }
-
-      .admin-toolbar-btn:hover {
-        background: var(--bg);
-      }
-
-      .tab-pill:hover:not(.active) {
-        background: rgba(0, 0, 0, 0.05);
-      }
-
-      .modal-panel {
-        max-width: 420px;
-      }
-    }
-
-    /* ======================================================================
-       Pointer-based hover states (mouse/trackpad only)
-       ====================================================================== */
-    @media (hover: hover) and (pointer: fine) {
-      .elig-circle:not(.elig-active):hover:not(:disabled) {
-        opacity: 0.7;
-      }
-    }
-
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MultiPass Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="favicon.svg">
+<!--
+================================================================================
+MultiPass — admin.html  (operator only)
+================================================================================
+PURPOSE
+  Run a singles qualifier: check people in, record payment, tick eligibility,
+  mark winners, manage the qualifier list, and email everyone registered.
+
+  Built to be used ON A PHONE AT THE VENUE. Check-in is the primary job and it
+  has to work one-handed at 375px, so the registration list is cards on mobile
+  and a table on desktop.
+
+REPLACES the previous admin.html, preserved as admin.sheets.html. That page
+  talked to Apps/Multipass/Api.js — a SPREADSHEET-backed GAS project behind
+  multipass.spmapa.workers.dev. MultiPass moved to Supabase on 2026-10-24 but
+  the admin page never followed, so it could not see a single one of the
+  registrations players are creating now. It was not broken-looking; it was
+  quietly reading the wrong database.
+
+AUTHENTICATION — authorize, don't just authenticate
+  Sign-in is a magic link mailed to a HARDCODED address (SQA_EMAIL in the GAS).
+  No email field exists anywhere in this flow, so there is no identity for a
+  caller to supply or tamper with. Deliberately NOT built on authSess_: that
+  session model has no role dimension, so any player who ever requested a login
+  link would have satisfied it.
+
+  ?admin=1 REVEALS THE UI AND GATES NOTHING. Every action re-checks the token
+  server-side. Treat the query string as a curtain, not a lock.
+
+  The session token lives in sessionStorage and expires server-side after 8h.
+  The link token is stripped from the URL immediately after it is exchanged.
+
+DEPENDENCIES
+  GAS mailer (rolodex-mailer Code.gs), actions sqa_*. No Supabase key here.
+================================================================================
+-->
+<style>
+:root{
+  --spm-primary:#ea002a;
+  --spm-accent:#0031a1;
+  --bg:#f5f5f5;
+  --card:#ffffff;
+  --border:#e1e1e1;
+  --text:#1f1f1f;
+  --muted:#666;
+  --ok:#1a7f37;
+  --ok-bg:#e8f5ec;
+  --warn:#8a6100;
+  --warn-bg:#fdf3e0;
+  --bad:#a02030;
+  --bad-bg:#fce8ea;
+  --info:#1a3b6b;
+  --info-bg:#e8f0fe;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;width:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
+
+.spm-page{width:100%;max-width:1080px;margin:0 auto;padding:12px}
+@media(min-width:768px){.spm-page{padding:16px 20px}}
+
+.spm-header{border-radius:22px;padding:20px;color:#fff;
+  background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));
+  box-shadow:0 6px 18px rgba(0,0,0,.25);text-align:center;margin-bottom:16px}
+.spm-header h1{margin:0;font-size:clamp(1.2rem,1rem + 1.4vw,1.6rem);font-weight:900;letter-spacing:-.02em}
+.spm-header p{margin:4px 0 0;font-size:.95rem;font-style:italic;opacity:.92}
+
+.spm-card{background:var(--card);border:1px solid var(--border);border-radius:20px;
+  padding:18px;box-shadow:0 3px 10px rgba(0,0,0,.1);margin-bottom:14px}
+
+.spm-btn{display:inline-block;border:none;border-radius:999px;padding:11px 20px;font-weight:700;
+  font-size:.95rem;cursor:pointer;min-height:44px;font-family:inherit;
+  transition:filter .15s,transform .15s}
+.spm-btn:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.spm-btn:disabled{opacity:.5;cursor:default;transform:none;filter:none}
+.spm-btn-primary{background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));color:#fff}
+.spm-btn-secondary{background:#fff;color:var(--text);border:2px solid var(--border)}
+.spm-btn-danger{background:#fff;color:var(--spm-primary);border:2px solid var(--spm-primary)}
+.spm-btn-sm{padding:7px 14px;min-height:38px;font-size:.82rem}
+
+label.fl{display:block;font-weight:700;font-size:.85rem;margin:0 0 4px}
+input.fi,select.fi,textarea.fi{width:100%;padding:10px 12px;font-size:1rem;font-family:inherit;
+  color:var(--text);background:#fff;border:2px solid var(--border);border-radius:11px;min-height:44px}
+textarea.fi{min-height:120px;resize:vertical}
+input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(--spm-accent)}
+.row{display:grid;gap:10px;margin-bottom:12px}
+@media(min-width:620px){.row.two{grid-template-columns:1fr 1fr}.row.three{grid-template-columns:1fr 1fr 1fr}}
+
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.tab{padding:9px 18px;border-radius:999px;border:2px solid var(--border);background:#fff;
+  font-weight:700;font-size:.9rem;cursor:pointer;min-height:42px;font-family:inherit;color:var(--text)}
+.tab.on{background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));color:#fff;border-color:transparent}
+
+.pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:.7rem;font-weight:800;
+  text-transform:uppercase;letter-spacing:.04em}
+.p-ok{background:var(--ok-bg);color:var(--ok)}
+.p-warn{background:var(--warn-bg);color:var(--warn)}
+.p-bad{background:var(--bad-bg);color:var(--bad)}
+.p-info{background:var(--info-bg);color:var(--info)}
+.p-mute{background:#eee;color:#777}
+
+/* Registrant list: cards on phones, table-ish on desktop. */
+.reg{border:1px solid var(--border);border-radius:14px;padding:13px;margin-bottom:10px;background:#fff}
+.reg.cancelled{opacity:.55;background:#fafafa}
+.reg.inhouse{border-color:#b7dfc4;background:var(--ok-bg)}
+.reg-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.reg-name{font-weight:800;font-size:1rem}
+.reg-sub{color:var(--muted);font-size:.82rem;overflow-wrap:anywhere}
+.reg-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.reg-acts{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}
+
+.counts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.count{padding:5px 13px;border-radius:999px;font-size:.82rem;font-weight:800;background:#eee;color:#555}
+.count b{font-weight:900}
+
+.ev{border:1px solid var(--border);border-radius:14px;padding:13px;margin-bottom:10px;background:#fff;
+  display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start}
+.ev.off{opacity:.6;background:#fafafa}
+
+.spm-modal{position:fixed;inset:0;background:rgba(0,0,0,.68);display:none;align-items:center;
+  justify-content:center;z-index:9999;padding:16px}
+.spm-modal.active{display:flex}
+.spm-modal-panel{width:100%;max-width:540px;background:#fff;border-radius:20px;padding:22px;
+  box-shadow:0 16px 40px rgba(0,0,0,.45);max-height:92svh;overflow-y:auto}
+.modal-title{margin:0 0 14px;font-size:1.15rem;font-weight:800}
+.modal-actions{display:flex;gap:10px;margin-top:14px}
+.modal-actions .spm-btn{flex:1 1 0}
+
+.msg{margin:0 0 12px;padding:11px 14px;border-radius:12px;font-weight:700;font-size:.9rem}
+.msg-ok{background:var(--ok-bg);color:var(--ok)}
+.msg-bad{background:var(--bad-bg);color:var(--bad)}
+.msg-info{background:var(--info-bg);color:var(--info)}
+.msg:empty{display:none;padding:0;margin:0}
+
+.state{text-align:center;color:var(--muted);padding:30px 14px}
+.note{margin:12px 0 0;padding-top:11px;border-top:1px solid var(--border);font-size:.82rem;color:var(--muted);line-height:1.5}
+.hide{display:none !important}
+.spm-footer{text-align:center;font-size:.78rem;color:var(--muted);padding:18px 0 14px}
+</style>
 </head>
 <body>
-<a href="./" title="Open the public site" style="position:fixed;top:12px;right:16px;z-index:1000;background:rgba(0,49,161,0.9);color:#fff;text-decoration:none;padding:5px 14px;border-radius:999px;font-size:0.78rem;font-weight:700;font-family:system-ui,-apple-system,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,0.2);transition:background 0.15s" onmouseover="this.style.background='rgba(0,49,161,1)'" onmouseout="this.style.background='rgba(0,49,161,0.9)'">View site &rarr;</a>
+<div class="spm-page">
 
-  <div class="page">
-    <!-- ================================================================== -->
-    <!-- Header -->
-    <!-- ================================================================== -->
-    <header>
-      <div class="title">South Portland Metro APA</div>
-      <div class="subtitle-group">
-        <span class="subtitle">MultiPass</span>
-      </div>
-      <div class="admin-pill">Admin Dashboard</div>
-      <div class="header-status" id="statusText"></div>
-    </header>
-
-    <!-- ================================================================== -->
-    <!-- Auth error (shown when admin token is missing) -->
-    <!-- ================================================================== -->
-    <div id="authError" style="display: none;">
-      <div class="auth-error">
-        <div class="auth-error-icon">&#128274;</div>
-        <div class="auth-error-title">Admin Token Required</div>
-        <div class="auth-error-msg">
-          This page requires an admin token.<br>
-          Access it via: admin.html?admin=&lt;token&gt;
-        </div>
-      </div>
-    </div>
-
-    <!-- ================================================================== -->
-    <!-- Main content (hidden until auth passes) -->
-    <!-- ================================================================== -->
-    <div id="mainContent" style="display: none;">
-
-      <!-- Toolbar: Refresh + CSV Export -->
-      <div class="admin-toolbar">
-        <button class="admin-toolbar-btn" id="refreshBtn" onclick="loadAdminData()">&#8635; Refresh</button>
-        <button class="admin-toolbar-btn" id="exportBtn" onclick="exportCsv()">&#8595; Export CSV</button>
-      </div>
-
-      <!-- Tab Toggle: Registrations / Qualifiers -->
-      <div class="tab-toggle">
-        <button class="tab-pill active" id="tabRegistrations" onclick="switchTab('registrations')">Registrations</button>
-        <button class="tab-pill" id="tabQualifiers" onclick="switchTab('qualifiers')">Qualifiers</button>
-      </div>
-
-      <!-- Registrations View (default) -->
-      <div id="registrationsView">
-        <div class="event-selector-card">
-          <div class="event-selector-label">Select Event</div>
-          <select class="event-selector" id="eventSelect" onchange="renderSelectedEvent()">
-            <option value="">Loading...</option>
-          </select>
-        </div>
-
-        <div class="admin-total-bar" id="totalBar" style="display: none;"></div>
-
-        <div id="tableContainer"></div>
-      </div>
-
-      <!-- Qualifiers View (hidden by default) -->
-      <div id="qualifiersView" style="display: none;">
-        <!-- Maintenance mode toggle -->
-        <div class="maintenance-card">
-          <label class="maintenance-label">
-            <input type="checkbox" id="maintenanceCheckbox" onchange="toggleMaintenance()">
-            &#128274; Maintenance Mode
-          </label>
-          <span class="bypass-key" id="bypassKeyDisplay" style="display: none;"></span>
-        </div>
-
-        <!-- Add Qualifier button -->
-        <button class="add-qualifier-btn" onclick="showQualifierModal(null)">+ Add Qualifier</button>
-
-        <!-- Time-window filter tabs -->
-        <div class="qual-filter-tabs" id="qualFilterTabs"></div>
-
-        <!-- Qualifier cards rendered here -->
-        <div id="qualifiersList"></div>
-      </div>
-
-    </div>
-
-    <!-- ================================================================== -->
-    <!-- Confirm Modal (Yes / Never Mind) -->
-    <!-- ================================================================== -->
-    <div class="modal" id="confirmModal">
-      <div class="modal-panel">
-        <div class="modal-title" id="confirmTitle">Confirm</div>
-        <div class="modal-message" id="confirmMessage">Are you sure?</div>
-        <div class="modal-actions">
-          <button class="modal-btn modal-btn-dismiss" id="confirmNo" type="button">Never Mind</button>
-          <button class="modal-btn modal-btn-confirm" id="confirmYes" type="button">Yes</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Payment Method Modal REMOVED — replaced by inline pay-method
-         buttons (Cash / CashApp / Venmo / PayPal) directly in each
-         registration row. See .pay-btns / .pay-btn CSS + handlePayBtn(). -->
-
-    <!-- ================================================================== -->
-    <!-- Qualifier Add/Edit Modal -->
-    <!-- ================================================================== -->
-    <div class="modal" id="qualifierModal">
-      <div class="modal-panel" style="text-align: left;">
-        <div class="modal-title" id="qualModalTitle" style="text-align: center;">Add Qualifier</div>
-
-        <div class="qual-form-group">
-          <label class="qual-form-label" for="qualStartInput">Start</label>
-          <input type="datetime-local" class="qual-form-input" id="qualStartInput">
-        </div>
-
-        <div class="qual-form-group">
-          <label class="qual-form-label" for="qualEndInput">End</label>
-          <input type="datetime-local" class="qual-form-input" id="qualEndInput">
-        </div>
-
-        <div class="qual-form-group">
-          <label class="qual-form-label">Format</label>
-          <div class="format-toggle">
-            <button type="button" class="format-toggle-btn" id="fmtBtn8" onclick="selectQualFormat('8')">8-Ball</button>
-            <button type="button" class="format-toggle-btn" id="fmtBtn9" onclick="selectQualFormat('9')">9-Ball</button>
-          </div>
-        </div>
-
-        <div class="qual-form-group">
-          <label class="qual-form-label" for="qualLocationName">Location Name</label>
-          <input type="text" class="qual-form-input" id="qualLocationName" placeholder="e.g., Crazy 8's Billiards">
-        </div>
-
-        <div class="qual-form-group">
-          <label class="qual-form-label" for="qualLocationAddress">Location Address</label>
-          <input type="text" class="qual-form-input" id="qualLocationAddress" placeholder="e.g., 123 Main St, Portland, ME">
-        </div>
-
-        <div class="qual-form-group">
-          <label class="qual-form-label" for="qualCutoffInput">Registration Cutoff</label>
-          <input type="datetime-local" class="qual-form-input" id="qualCutoffInput">
-        </div>
-
-        <div style="display:flex;gap:12px;">
-          <div class="qual-form-group" style="flex:1;">
-            <label class="qual-form-label" for="qualEntryFee">Entry Fee ($)</label>
-            <input type="number" class="qual-form-input" id="qualEntryFee" min="0" step="1" value="50">
-          </div>
-          <div class="qual-form-group" style="flex:1;">
-            <label class="qual-form-label" for="qualGreensFee">Greens Fee ($)</label>
-            <input type="number" class="qual-form-input" id="qualGreensFee" min="0" step="1" value="3">
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <button class="modal-btn modal-btn-dismiss" type="button" onclick="closeQualifierModal()">Cancel</button>
-          <button class="qual-save-btn" type="button" onclick="saveQualifier()">Save</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Eligibility queue toast -->
-    <div class="elig-queue-toast" id="eligQueueToast"></div>
-
-    <!-- Footer -->
-    <div class="footer">South Portland Metro APA &bull; MultiPass Admin</div>
+  <!-- Curtain: without ?admin=1 the page says nothing about what it is. -->
+  <div id="curtain" class="spm-card state">
+    <p style="margin:0">Nothing to see here.</p>
   </div>
 
-  <script>
-    // ======================================================================
-    // MultiPass Admin Dashboard — Standalone JavaScript
-    // ======================================================================
-    //
-    // ARCHITECTURE:
-    //   - callServer(action, params) posts JSON to Cloudflare Worker proxy
-    //   - Admin token read from URL ?admin=<token>
-    //   - All admin API calls include adminToken in the JSON body
-    //   - Data cached in `adminData`; UI renders from cache
-    //   - Optimistic UI updates with server confirmation / rollback
-    //
-    // API ROUTES (see Api.js doPost switch):
-    //   getAdminData, togglePrePaid, toggleEligibility,
-    //   adminCancelRegistration, addQualifier, updateQualifier,
-    //   deleteQualifier, setMaintenanceMode
-    //
-    // ======================================================================
+  <div id="app" class="hide">
+    <header class="spm-header">
+      <h1>MultiPass Admin</h1>
+      <p id="hdr-sub">Singles qualifiers</p>
+    </header>
 
+    <!-- Sign-in -->
+    <div id="signin" class="spm-card hide">
+      <p id="signin-msg" class="msg"></p>
+      <p style="margin:0 0 14px">
+        Sign in with a link emailed to the league address. The link works once and
+        lasts 15 minutes.
+      </p>
+      <button class="spm-btn spm-btn-primary" id="btn-link">Email me a sign-in link</button>
+      <p class="note">
+        The address is fixed in the server — there is no field to change it, so this
+        button can only ever mail the league inbox.
+      </p>
+    </div>
 
-    // -- Constants --
-    var APP_NAME = 'MultiPass';
-    var API_URL = 'https://multipass.spmapa.workers.dev';
+    <!-- Console -->
+    <div id="console" class="hide">
+      <div class="tabs">
+        <button class="tab on" data-tab="run">Run the qualifier</button>
+        <button class="tab" data-tab="quals">Qualifiers</button>
+        <button class="tab" data-tab="blast">Email registrants</button>
+        <button class="tab spm-btn-secondary" id="btn-out" style="margin-left:auto">Sign out</button>
+      </div>
 
-    // -- Admin token from URL --
-    // Read once on page load. If missing, show auth error and block UI.
-    var adminToken = (function() {
-      var params = new URLSearchParams(window.location.search);
-      return params.get('admin') || '';
-    })();
+      <p id="msg" class="msg"></p>
 
-    // -- Server data cache --
-    var adminData = null;
+      <!-- ── Run tab ─────────────────────────────────────────────── -->
+      <section id="tab-run">
+        <div class="spm-card">
+          <label class="fl" for="sel-ev">Qualifier</label>
+          <select class="fi" id="sel-ev"></select>
+          <div class="counts" id="counts" style="margin-top:12px"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="spm-btn spm-btn-secondary spm-btn-sm" id="btn-refresh">Refresh</button>
+            <button class="spm-btn spm-btn-secondary spm-btn-sm" id="btn-add">Add someone</button>
+            <button class="spm-btn spm-btn-secondary spm-btn-sm" id="btn-csv">Export CSV</button>
+            <label style="display:flex;align-items:center;gap:7px;font-size:.85rem;font-weight:600">
+              <input type="checkbox" id="hide-cancelled" checked style="width:17px;height:17px;accent-color:var(--spm-accent)">
+              Hide cancelled
+            </label>
+          </div>
+        </div>
+        <div id="regs"></div>
+      </section>
 
-    // -- Pending confirm callback --
-    var pendingConfirm = null;
+      <!-- ── Qualifiers tab ──────────────────────────────────────── -->
+      <section id="tab-quals" class="hide">
+        <div class="spm-card">
+          <button class="spm-btn spm-btn-primary spm-btn-sm" id="btn-new">New qualifier</button>
+          <p class="note">
+            Archiving a qualifier hides it from players <em>and</em> closes registration —
+            anyone holding the old link is refused server-side, not just shown a missing card.
+          </p>
+        </div>
+        <div id="evs"></div>
+      </section>
 
-    // pendingPayMethod REMOVED — inline buttons don't need a callback var.
+      <!-- ── Blast tab ───────────────────────────────────────────── -->
+      <section id="tab-blast" class="hide">
+        <div class="spm-card">
+          <p style="margin:0 0 12px">
+            Goes to everyone still <strong>registered</strong> for the qualifier selected on the
+            first tab. Addresses are BCC'd, never To.
+          </p>
+          <div class="row"><div>
+            <label class="fl" for="bl-sub">Subject</label>
+            <input class="fi" id="bl-sub" maxlength="150">
+          </div></div>
+          <div class="row"><div>
+            <label class="fl" for="bl-msg">Message</label>
+            <textarea class="fi" id="bl-msg" maxlength="4000"></textarea>
+          </div></div>
+          <button class="spm-btn spm-btn-primary" id="btn-blast">Send to registrants</button>
+          <p class="note">
+            The whole app fleet shares roughly 100 emails a day on this Gmail account.
+            A blast is the one action here that can exhaust that in a single click, so it is
+            capped at 60 recipients and 4 blasts a day.
+          </p>
+        </div>
+      </section>
+    </div>
+  </div>
 
+  <p class="spm-footer">South Portland Metro APA</p>
+</div>
 
-    // ======================================================================
-    // API Communication
-    // ======================================================================
+<!-- Add registration -->
+<div class="spm-modal" id="dlg-add">
+  <div class="spm-modal-panel">
+    <h2 class="modal-title">Add a registration</h2>
+    <p id="add-msg" class="msg"></p>
+    <div class="row two">
+      <div><label class="fl" for="a-fn">First name</label><input class="fi" id="a-fn" maxlength="60"></div>
+      <div><label class="fl" for="a-ln">Last name</label><input class="fi" id="a-ln" maxlength="60"></div>
+    </div>
+    <div class="row two">
+      <div>
+        <label class="fl" for="a-mn">APA number</label>
+        <input class="fi" id="a-mn" inputmode="numeric" maxlength="8" placeholder="8 digits">
+      </div>
+      <div><label class="fl" for="a-em">Email (optional)</label><input class="fi" id="a-em" type="email" maxlength="120"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="spm-btn spm-btn-primary" id="a-go">Add</button>
+      <button class="spm-btn spm-btn-secondary" data-close>Cancel</button>
+    </div>
+  </div>
+</div>
 
-    /**
-     * Sends a JSON POST request to the Cloudflare Worker proxy.
-     * Automatically injects the admin token into the payload.
-     *
-     * @param {string} action - the Api.js route name (e.g., 'getAdminData')
-     * @param {Object} [params] - additional parameters merged into the body
-     * @returns {Promise<Object>} parsed JSON response from the server
-     */
-    function callServer(action, params) {
-      var body = Object.assign({ action: action, adminToken: adminToken }, params || {});
+<!-- Payment -->
+<div class="spm-modal" id="dlg-pay">
+  <div class="spm-modal-panel">
+    <h2 class="modal-title">Payment</h2>
+    <p id="pay-who" style="margin:0 0 12px;color:var(--muted)"></p>
+    <p id="pay-msg" class="msg"></p>
+    <div class="row two">
+      <div><label class="fl" for="p-amt">Amount</label><input class="fi" id="p-amt" inputmode="decimal" placeholder="50"></div>
+      <div>
+        <label class="fl" for="p-method">Method</label>
+        <select class="fi" id="p-method">
+          <option value="">—</option>
+          <option>Cash</option><option>Card</option><option>Venmo</option>
+          <option>PayPal</option><option>Comp</option><option>Other</option>
+        </select>
+      </div>
+    </div>
+    <label style="display:flex;align-items:center;gap:9px;font-weight:700;font-size:.9rem;margin:4px 0 0">
+      <input type="checkbox" id="p-email" checked style="width:18px;height:18px;accent-color:var(--spm-accent)">
+      Email them a receipt
+    </label>
+    <p class="note" style="margin-top:8px">A receipt goes out once. Re-saving will not mail them again.</p>
+    <div class="modal-actions">
+      <button class="spm-btn spm-btn-primary" id="p-go">Mark paid</button>
+      <button class="spm-btn spm-btn-danger" id="p-clear">Clear</button>
+      <button class="spm-btn spm-btn-secondary" data-close>Close</button>
+    </div>
+  </div>
+</div>
 
-      return fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify(body),
-        redirect: 'follow'
-      }).then(function(response) {
-        if (!response.ok) throw new Error('Network error: ' + response.status);
-        return response.json();
-      });
+<!-- Qualifier editor -->
+<div class="spm-modal" id="dlg-ev">
+  <div class="spm-modal-panel">
+    <h2 class="modal-title" id="ev-title">Qualifier</h2>
+    <p id="ev-msg" class="msg"></p>
+    <div class="row"><div>
+      <label class="fl" for="e-title">Title</label>
+      <input class="fi" id="e-title" maxlength="200" placeholder="8 Ball Play Til You Win Singles Qualifiers">
+    </div></div>
+    <div class="row two">
+      <div>
+        <label class="fl" for="e-format">Format</label>
+        <select class="fi" id="e-format"><option value="8">8 Ball</option><option value="9">9 Ball</option></select>
+      </div>
+      <div>
+        <label class="fl" for="e-season">Advances to</label>
+        <input class="fi" id="e-season" maxlength="60" placeholder="Spring 2027">
+      </div>
+    </div>
+    <div class="row two">
+      <div><label class="fl" for="e-start">Starts (Pacific)</label><input class="fi" id="e-start" type="datetime-local"></div>
+      <div><label class="fl" for="e-last">Last board (Pacific)</label><input class="fi" id="e-last" type="datetime-local"></div>
+    </div>
+    <div class="row two">
+      <div><label class="fl" for="e-venue">Venue</label><input class="fi" id="e-venue" maxlength="160"></div>
+      <div><label class="fl" for="e-addr">Address</label><input class="fi" id="e-addr" maxlength="240"></div>
+    </div>
+    <div class="row two">
+      <div><label class="fl" for="e-entry">Entry fee</label><input class="fi" id="e-entry" inputmode="decimal"></div>
+      <div><label class="fl" for="e-greens">Greens fee</label><input class="fi" id="e-greens" inputmode="decimal"></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:9px;font-weight:700;font-size:.9rem">
+      <input type="checkbox" id="e-enabled" checked style="width:18px;height:18px;accent-color:var(--spm-accent)">
+      Open for registration
+    </label>
+    <p class="note" style="margin-top:8px">
+      Times are entered and shown in Pacific. Registration closes automatically once the
+      last board has started.
+    </p>
+    <div class="modal-actions">
+      <button class="spm-btn spm-btn-primary" id="e-go">Save</button>
+      <button class="spm-btn spm-btn-secondary" data-close>Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var GAS = "https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec";
+  var TZ = 'America/Los_Angeles';
+  var SKEY = 'spm-sqa-session';
+
+  var D = { events: [], regs: [], elig: [], qual: [], eventId: 0 };
+  var token = null, payId = null, evEditId = 0;
+
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+  function post(p) {
+    var body = {};
+    for (var k in p) body[k] = p[k];
+    if (token) body.admin = token;
+    return fetch(GAS, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify(body), redirect: 'follow' })
+      .then(function (r) { return r.json(); });
+  }
+
+  function say(el, kind, text) {
+    var n = $(el);
+    n.className = 'msg msg-' + kind;
+    n.textContent = text || '';
+  }
+
+  /* Any handler can answer code:'auth' once the 8h session lapses. Drop straight
+     back to sign-in rather than leaving dead buttons on screen. */
+  function guard(j) {
+    if (j && j.code === 'auth') { signOut('Your session expired. Sign in again.'); return false; }
+    return true;
+  }
+
+  // ── Pacific helpers ─────────────────────────────────────────────────────
+  function fmtDT(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', timeZone: TZ });
+  }
+  /* datetime-local has no timezone. Read/write it AS PACIFIC explicitly, or an
+     operator in any other zone silently shifts every start time. */
+  function isoToLocalInput(iso) {
+    if (!iso) return '';
+    var p = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit',
+      day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(iso));
+    var g = {}; p.forEach(function (x) { g[x.type] = x.value; });
+    return g.year + '-' + g.month + '-' + g.day + 'T' + (g.hour === '24' ? '00' : g.hour) + ':' + g.minute;
+  }
+  function localInputToIso(v) {
+    if (!v) return null;
+    /* Find the UTC instant whose Pacific wall time equals what was typed.
+       Probe once, measure the offset that date actually had, correct. */
+    var naive = new Date(v + 'Z');
+    var guess = new Date(naive.getTime());
+    for (var i = 0; i < 2; i++) {
+      var shown = isoToLocalInput(guess.toISOString());
+      var diff = (new Date(v + 'Z')).getTime() - (new Date(shown + 'Z')).getTime();
+      if (!diff) break;
+      guess = new Date(guess.getTime() + diff);
     }
-
-
-    // ======================================================================
-    // Utility Functions
-    // ======================================================================
-
-    /**
-     * XSS-safe HTML escaping. Every dynamic value in innerHTML MUST pass
-     * through this function. No exceptions.
-     */
-    function esc(str) {
-      var div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
-    }
-
-    /**
-     * Set the header status text.
-     */
-    function setStatus(msg) {
-      document.getElementById('statusText').textContent = msg;
-    }
-
-
-    // ======================================================================
-    // Confirm Modal
-    // ======================================================================
-
-    /**
-     * Shows a branded confirmation modal. When the user clicks Yes,
-     * the onConfirm callback fires. Never Mind dismisses silently.
-     */
-    function showConfirmModal(title, message, yesLabel, onConfirm) {
-      document.getElementById('confirmTitle').textContent = title;
-      document.getElementById('confirmMessage').textContent = message;
-      document.getElementById('confirmYes').textContent = yesLabel;
-      pendingConfirm = onConfirm;
-      document.getElementById('confirmModal').style.display = 'flex';
-    }
-
-    function closeConfirmModal() {
-      document.getElementById('confirmModal').style.display = 'none';
-      pendingConfirm = null;
-    }
-
-
-    // Payment Method Modal — REMOVED.
-    // Replaced by inline pay-method buttons in each registration row.
-    // See handlePayBtn() and executePayToggle() above.
-
-
-    // ======================================================================
-    // Data Loading
-    // ======================================================================
-
-    /**
-     * Fetches all admin data from the server and populates the UI.
-     * Called on page load and when the Refresh button is tapped.
-     */
-    async function loadAdminData() {
-      setStatus('Loading\u2026');
-      document.getElementById('refreshBtn').disabled = true;
-      document.getElementById('exportBtn').disabled = true;
-
-      try {
-        var data = await callServer('getAdminData');
-
-        if (!data || !data.success) {
-          setStatus('Error');
-          document.getElementById('tableContainer').innerHTML =
-            '<div class="admin-empty">' + esc((data && data.error) || 'Failed to load data.') + '</div>';
-          return;
-        }
-
-        adminData = data;
-        setStatus('');
-
-        // Populate event dropdown
-        populateEventDropdown(data.qualifiers);
-
-        // Show total bar
-        var totalBar = document.getElementById('totalBar');
-        totalBar.style.display = '';
-        totalBar.textContent = data.totalRegistrations + ' total registration' +
-          (data.totalRegistrations !== 1 ? 's' : '') + ' across ' +
-          data.qualifiers.length + ' event' + (data.qualifiers.length !== 1 ? 's' : '');
-
-        // Render the first/selected event
-        renderSelectedEvent();
-
-      } catch (err) {
-        setStatus('Error');
-        document.getElementById('tableContainer').innerHTML =
-          '<div class="admin-empty">Failed to load admin data. Please try again.</div>';
-        console.error('loadAdminData error:', err);
-      } finally {
-        document.getElementById('refreshBtn').disabled = false;
-        document.getElementById('exportBtn').disabled = false;
-      }
-    }
-
-
-    // ======================================================================
-    // Event Dropdown
-    // ======================================================================
-
-    /**
-     * Populates the event selector dropdown with qualifier options.
-     * Each option shows: "March 28 — 8-Ball (3 registered)"
-     * Includes a "Pending Eligibility" option at the top.
-     */
-    function populateEventDropdown(qualifiers) {
-      var select = document.getElementById('eventSelect');
-      var previousValue = select.value;
-
-      select.innerHTML = '';
-
-      if (!qualifiers || qualifiers.length === 0) {
-        var opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = 'No upcoming events';
-        select.appendChild(opt);
-        return;
-      }
-
-      // "Pending Eligibility" option — shows unconfirmed players across all events
-      var allPending = countAllPending_(qualifiers);
-      var allOpt = document.createElement('option');
-      allOpt.value = 'ALL';
-      allOpt.textContent = 'Pending Eligibility' +
-        (allPending > 0 ? ' \u2014 ' + allPending + ' pending' : '');
-      select.appendChild(allOpt);
-
-      for (var i = 0; i < qualifiers.length; i++) {
-        var q = qualifiers[i];
-        var opt = document.createElement('option');
-        opt.value = q.dateDisplay + '|' + q.format;
-
-        // Strip day name for dropdown (e.g., "Saturday, March 28" -> "March 28")
-        var displayDate = q.dateDisplay;
-        var commaPos = displayDate.indexOf(', ');
-        if (commaPos !== -1) displayDate = displayDate.substring(commaPos + 2);
-
-        var count = q.registrationCount || 0;
-        var unconfirmed = 0;
-        var regs = q.registrations || [];
-        for (var r = 0; r < regs.length; r++) {
-          if (!regs[r].eligibilityConfirmed) unconfirmed++;
-        }
-        var closedTag = q.isClosed ? ' [CLOSED]' : '';
-        var unconfTag = unconfirmed > 0 ? ' \u2014 ' + unconfirmed + ' pending' : '';
-        opt.textContent = displayDate + ' \u2014 ' + q.formatDisplay +
-          ' (' + count + ' registered)' + unconfTag + closedTag;
-
-        select.appendChild(opt);
-      }
-
-      // Restore previous selection if still valid, then try localStorage.
-      // IMPORTANT: After rebuilding options, the browser auto-selects the
-      // first option ("ALL"), so select.value is already truthy. We must
-      // check localStorage BEFORE falling through, not after.
-      var restored = false;
-      if (previousValue && previousValue !== 'ALL') {
-        select.value = previousValue;
-        restored = (select.value === previousValue);
-      }
-      if (!restored) {
-        try {
-          var saved = localStorage.getItem('multipass_admin_lastQual');
-          if (saved) {
-            select.value = saved;
-            restored = (select.value === saved);
-          }
-        } catch(e) {}
-      }
-      if (!restored && select.options.length > 0) {
-        select.selectedIndex = 0;
-      }
-    }
-
-    /**
-     * Counts unique member+format pairs with pending eligibility across all events.
-     */
-    function countAllPending_(qualifiers) {
-      var seen = {};
-      var count = 0;
-      for (var i = 0; i < qualifiers.length; i++) {
-        var regs = qualifiers[i].registrations || [];
-        for (var r = 0; r < regs.length; r++) {
-          var key = regs[r].memberNumber + '|' + qualifiers[i].format;
-          if (!seen[key]) {
-            seen[key] = true;
-            if (!regs[r].eligibilityConfirmed) count++;
-          }
-        }
-      }
-      return count;
-    }
-
-
-    // ======================================================================
-    // Table Sorting
-    // ======================================================================
-
-    /**
-     * Tracks the current sort state for the registration table.
-     * key: sort field name ('firstName', 'lastName'), or '' for no sort.
-     * dir: 'asc' or 'desc'.
-     */
-    var currentSort = { key: '', dir: 'asc' };
-    // Row filter: 'all' | 'unpaid' | 'paid' | 'qualified'
-    var activeFilter = 'all';
-
-    /**
-     * Handles a sortable column header click.
-     * Cycles: unsorted → asc → desc → unsorted.
-     * Re-renders the table with the new sort applied.
-     */
-    function handleSort(th) {
-      var key = th.getAttribute('data-sort');
-      if (currentSort.key === key) {
-        // Already sorting by this column — toggle direction or clear
-        if (currentSort.dir === 'asc') {
-          currentSort.dir = 'desc';
-        } else {
-          // Was desc → clear sort
-          currentSort.key = '';
-          currentSort.dir = 'asc';
-        }
-      } else {
-        // New column — start ascending
-        currentSort.key = key;
-        currentSort.dir = 'asc';
-      }
-      renderSelectedEvent();
-    }
-
-    /**
-     * Set the active row filter and re-render.
-     * @param {string} filter - 'all' | 'unpaid' | 'paid' | 'qualified'
-     */
-    function setFilter(filter) {
-      activeFilter = (activeFilter === filter) ? 'all' : filter;
-      renderSelectedEvent();
-    }
-
-    /**
-     * Copy emails of currently visible players (after filtering) to clipboard.
-     * Strips spaces from emails. Shows a brief confirmation.
-     */
-    function copyEmails() {
-      var select = document.getElementById('eventSelect');
-      var selectedKey = select ? select.value : '';
-      if (!adminData || !selectedKey || selectedKey === 'ALL') {
-        alert('Select a qualifier first.');
-        return;
-      }
-
-      // Find the qualifier
-      var qual = null;
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
-        if ((q.dateDisplay + '|' + q.format) === selectedKey) { qual = q; break; }
-      }
-      if (!qual) return;
-
-      // Apply the same filter as the current view
-      var regs = (qual.registrations || []).slice();
-      if (activeFilter === 'unpaid') {
-        regs = regs.filter(function(r) { return !r.paymentMethod; });
-      } else if (activeFilter === 'paid') {
-        regs = regs.filter(function(r) { return !!r.paymentMethod; });
-      } else if (activeFilter === 'eligible') {
-        regs = regs.filter(function(r) { return r.eligibilityConfirmed === 'eligible'; });
-      } else if (activeFilter === 'ineligible') {
-        regs = regs.filter(function(r) { return r.eligibilityConfirmed === 'ineligible'; });
-      } else if (activeFilter === 'unconfirmed') {
-        regs = regs.filter(function(r) { return !r.eligibilityConfirmed; });
-      } else if (activeFilter === 'qualified') {
-        regs = regs.filter(function(r) { return r.singlesRegionals === 'yes'; });
-      }
-
-      // Collect non-empty emails, strip spaces
-      var emails = [];
-      for (var j = 0; j < regs.length; j++) {
-        var email = (regs[j].email || '').replace(/\s/g, '');
-        if (email) emails.push(email);
-      }
-
-      if (emails.length === 0) {
-        alert('No emails to copy.');
-        return;
-      }
-
-      var text = emails.join(', ');
-      navigator.clipboard.writeText(text).then(function() {
-        // Brief visual feedback — flash the copy button
-        var btn = document.querySelector('[onclick="copyEmails()"]');
-        if (btn) {
-          var orig = btn.textContent;
-          btn.textContent = '\u2705 Copied ' + emails.length + '!';
-          btn.classList.add('active');
-          setTimeout(function() { btn.textContent = orig; btn.classList.remove('active'); }, 2000);
-        }
-      }).catch(function() {
-        // Fallback: select a textarea
-        prompt('Copy these emails:', text);
-      });
-    }
-
-    /**
-     * Returns the CSS class suffix for a sortable <th>.
-     * Used during header rendering to show the active sort arrow.
-     */
-    function sortClass_(key) {
-      if (currentSort.key !== key) return '';
-      return currentSort.dir === 'asc' ? ' sort-asc' : ' sort-desc';
-    }
-
-    /**
-     * Extracts the sortable value from a registration object.
-     * Normalizes to lowercase string for case-insensitive sorting.
-     */
-    function getSortValue_(reg, key, is8Ball) {
-      if (key === 'sl') {
-        // Sort by the relevant SL as a number (blanks sort last)
-        var slVal = is8Ball ? (reg.sl8 || '') : (reg.sl9 || '');
-        return slVal ? parseInt(slVal, 10) : 999;
-      }
-      var val = reg[key] || '';
-      return String(val).toLowerCase();
-    }
-
-
-    // ======================================================================
-    // Table Rendering
-    // ======================================================================
-
-    /**
-     * Renders the registration table for the currently selected event.
-     */
-    function renderSelectedEvent() {
-      var container = document.getElementById('tableContainer');
-      var select = document.getElementById('eventSelect');
-      var selectedKey = select.value;
-
-      // Persist selected qualifier so it survives page reload
-      if (selectedKey) {
-        try { localStorage.setItem('multipass_admin_lastQual', selectedKey); } catch(e) {}
-      }
-
-      if (!adminData || !adminData.qualifiers || !selectedKey) {
-        container.innerHTML = '<div class="admin-empty">Select an event to view registrations.</div>';
-        return;
-      }
-
-      // "All Players" eligibility overview
-      if (selectedKey === 'ALL') {
-        renderAllPlayersView(container);
-        return;
-      }
-
-      // Find the qualifier matching the selected key
-      var qual = null;
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
-        if ((q.dateDisplay + '|' + q.format) === selectedKey) {
-          qual = q;
-          break;
-        }
-      }
-
-      if (!qual) {
-        container.innerHTML = '<div class="admin-empty">Event not found.</div>';
-        return;
-      }
-
-      var regs = qual.registrations || [];
-
-      // Event details banner
-      var statusBadge = qual.isClosed
-        ? '<span style="color:#dc3545;font-weight:800;">CLOSED</span>'
-        : '<span style="color:#28a745;font-weight:800;">OPEN</span>';
-
-      var detailsHtml = '<div class="event-details-banner">' +
-        '<div class="event-detail-row">' +
-          '<strong>' + esc(qual.dateDisplay) + '</strong> \u2014 ' +
-          esc(qual.formatDisplay) + ' \u2014 ' + statusBadge +
-        '</div>' +
-        '<div class="event-detail-row">' +
-          esc(qual.timeDisplay || '') +
-        '</div>' +
-        '<div class="event-detail-row">' +
-          esc(qual.locationName || '') +
-        '</div>' +
-        '<div class="event-detail-row event-detail-address">' +
-          esc(qual.locationAddress || '') +
-        '</div>' +
-      '</div>';
-
-      if (regs.length === 0) {
-        container.innerHTML = detailsHtml +
-          '<div class="admin-empty">No registrations for this event yet.</div>';
-        return;
-      }
-
-      // Show SL column for the event's format
-      var is8Ball = (qual.format === '8');
-      var slHeader = is8Ball ? '8-Ball SL' : '9-Ball SL';
-
-      // Sort registrations if a sort is active for this event
-      var sortedRegs = regs.slice(); // shallow copy to avoid mutating cache
-      if (currentSort.key) {
-        sortedRegs.sort(function(a, b) {
-          var va = getSortValue_(a, currentSort.key, is8Ball);
-          var vb = getSortValue_(b, currentSort.key, is8Ball);
-          if (va < vb) return currentSort.dir === 'asc' ? -1 : 1;
-          if (va > vb) return currentSort.dir === 'asc' ? 1 : -1;
-          return 0;
-        });
-      }
-
-      // ── Payment summary: count paid per method, compute totals ────────
-      // Uses ALL registrations (not filtered copy) so numbers are always correct.
-      var entryFee  = qual.entryFee != null ? qual.entryFee : 50;
-      var greensFee = qual.greensFee != null ? qual.greensFee : 3;
-      var perPlayer = entryFee + greensFee;
-      var methodTotals = {};    // { Cash: count, Venmo: count, ... }
-      var paidCount = 0;
-      var unpaidCount = 0;
-      for (var pi = 0; pi < regs.length; pi++) {
-        var pm = regs[pi].paymentMethod;
-        if (pm) {
-          paidCount++;
-          methodTotals[pm] = (methodTotals[pm] || 0) + 1;
-        } else {
-          unpaidCount++;
-        }
-      }
-      var totalEntry  = paidCount * entryFee;
-      var totalGreens = paidCount * greensFee;
-      var grandTotal  = totalEntry + totalGreens;
-
-      // Build summary box — stacked list layout
-      var summaryHtml = '<div class="payment-summary">' +
-        '<div class="payment-summary-title">Payment Summary</div>' +
-        '<div class="payment-summary-fees">' +
-          '$' + entryFee + ' entry + $' + greensFee + ' greens = <strong>$' + perPlayer + '</strong> per player' +
-        '</div>';
-
-      // Stacked list: one row per payment method
-      var methodOrder = ['Cash', 'CashApp', 'Venmo', 'PayPal'];
-      summaryHtml += '<div class="payment-summary-stack">';
-      for (var mi2 = 0; mi2 < methodOrder.length; mi2++) {
-        var mName = methodOrder[mi2];
-        var mCount = methodTotals[mName] || 0;
-        var mTotal = mCount * perPlayer;
-        summaryHtml += '<div class="payment-summary-method">' +
-          '<span class="payment-summary-label">' + mName + '</span>' +
-          '<span class="payment-summary-value">' + mCount + ' player' + (mCount !== 1 ? 's' : '') + ' &mdash; <strong>$' + mTotal + '</strong></span>' +
-        '</div>';
-      }
-      summaryHtml += '</div>';
-
-      // Totals section: entry fees, greens fees, grand total, unpaid
-      summaryHtml +=
-        '<div class="payment-summary-totals">' +
-          '<div class="payment-summary-row">' +
-            '<span>Entry Fees (' + paidCount + ' &times; $' + entryFee + ')</span><strong>$' + totalEntry + '</strong>' +
-          '</div>' +
-          '<div class="payment-summary-row">' +
-            '<span>Greens Fees (' + paidCount + ' &times; $' + greensFee + ')</span><strong>$' + totalGreens + '</strong>' +
-          '</div>' +
-          '<div class="payment-summary-row payment-summary-grand">' +
-            '<span>Total Collected</span><strong>' + paidCount + ' player' + (paidCount !== 1 ? 's' : '') + ' &mdash; $' + grandTotal + '</strong>' +
-          '</div>' +
-          '<div class="payment-summary-row payment-summary-unpaid">' +
-            '<span>Not Paid (did not attend)</span><strong>' + unpaidCount + ' player' + (unpaidCount !== 1 ? 's' : '') + '</strong>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
-
-      // Apply active row filter
-      var preFilterCount = sortedRegs.length;
-      if (activeFilter === 'unpaid') {
-        sortedRegs = sortedRegs.filter(function(reg) { return !reg.paymentMethod; });
-      } else if (activeFilter === 'paid') {
-        sortedRegs = sortedRegs.filter(function(reg) { return !!reg.paymentMethod; });
-      } else if (activeFilter === 'eligible') {
-        sortedRegs = sortedRegs.filter(function(reg) { return reg.eligibilityConfirmed === 'eligible'; });
-      } else if (activeFilter === 'ineligible') {
-        sortedRegs = sortedRegs.filter(function(reg) { return reg.eligibilityConfirmed === 'ineligible'; });
-      } else if (activeFilter === 'unconfirmed') {
-        sortedRegs = sortedRegs.filter(function(reg) { return !reg.eligibilityConfirmed; });
-      } else if (activeFilter === 'qualified') {
-        sortedRegs = sortedRegs.filter(function(reg) { return reg.singlesRegionals === 'yes'; });
-      }
-      var hiddenCount = preFilterCount - sortedRegs.length;
-
-      // Count qualified (singles regionals) from full list
-      var qualifiedCount = 0;
-      for (var qi = 0; qi < regs.length; qi++) {
-        if (regs[qi].singlesRegionals === 'yes') qualifiedCount++;
-      }
-
-      // Count eligibility states from full list
-      var eligibleCount = 0, ineligibleCount = 0, unconfirmedCount = 0;
-      for (var ei = 0; ei < regs.length; ei++) {
-        var es = regs[ei].eligibilityConfirmed || '';
-        if (es === 'eligible') eligibleCount++;
-        else if (es === 'ineligible') ineligibleCount++;
-        else unconfirmedCount++;
-      }
-
-      // Filter buttons — pill bar with filters + copy emails action
-      function filterBtn_(id, label) {
-        var cls = (activeFilter === id) ? ' active' : '';
-        return '<button class="filter-btn' + cls + '" onclick="setFilter(\'' + id + '\')">' + label + '</button>';
-      }
-      var filterBarHtml =
-        '<div class="filter-bar">' +
-          filterBtn_('all', 'All (' + preFilterCount + ')') +
-          filterBtn_('unpaid', 'Unpaid (' + unpaidCount + ')') +
-          filterBtn_('paid', 'Paid (' + paidCount + ')') +
-          filterBtn_('eligible', 'Eligible (' + eligibleCount + ')') +
-          filterBtn_('ineligible', 'Ineligible (' + ineligibleCount + ')') +
-          filterBtn_('unconfirmed', 'Unconfirmed (' + unconfirmedCount + ')') +
-          filterBtn_('qualified', 'Qualified (' + qualifiedCount + ')') +
-          '<button class="filter-btn" onclick="copyEmails()" title="Copy emails of currently visible players to clipboard">&#128203; Copy Emails</button>' +
-        '</div>';
-
-      // Build table — First and Last name are separate sortable columns
-      var html = detailsHtml + summaryHtml + filterBarHtml +
-        '<div class="reg-table-wrap"><table class="reg-table">' +
-        '<thead><tr>' +
-          '<th>Member #</th>' +
-          '<th class="sortable' + sortClass_('firstName') + '" data-sort="firstName" onclick="handleSort(this)">First</th>' +
-          '<th class="sortable' + sortClass_('lastName') + '" data-sort="lastName" onclick="handleSort(this)">Last</th>' +
-          '<th class="sortable' + sortClass_('sl') + '" data-sort="sl" onclick="handleSort(this)">' + esc(slHeader) + '</th>' +
-          '<th>Payment</th>' +
-          '<th>Eligibility</th>' +
-          '<th>Singles</th>' +
-          '<th></th>' +
-        '</tr></thead><tbody>';
-
-      for (var r = 0; r < sortedRegs.length; r++) {
-        var reg = sortedRegs[r];
-        var sl = is8Ball ? (reg.sl8 || '\u2014') : (reg.sl9 || '\u2014');
-
-        // Payment method buttons — 4 inline pills per row.
-        // PaymentMethod is the source of truth for paid status.
-        // If paymentMethod is set, the player is paid. No separate PrePaid check.
-        var paidMethod = reg.paymentMethod || '';
-
-        // Legacy case: prePaid="yes" but paymentMethod="" means paid under the
-        // old toggle system before payment method tracking was added.
-        // Show amber-outlined buttons so admin can assign the correct method.
-        var legacyPaid = (reg.prePaid === 'yes' && !paidMethod);
-
-        // Eligibility circles
-        var eligState = reg.eligibilityConfirmed || '';
-        var escMem  = esc(reg.memberNumber);
-        var escDate = esc(qual.dateDisplay);
-        var escFmt  = esc(qual.format);
-
-        // Build 4 payment-method pill buttons
-        var methods = ['Cash', 'CashApp', 'Venmo', 'PayPal'];
-        var payBtnsHtml = '<div class="pay-btns' + (legacyPaid ? ' legacy-paid' : '') + '">';
-        for (var mi = 0; mi < methods.length; mi++) {
-          var m = methods[mi];
-          var isActive = (paidMethod === m) ? ' active' : '';
-          payBtnsHtml += '<button class="pay-btn' + isActive + '"' +
-            ' data-member="' + escMem + '"' +
-            ' data-date="' + escDate + '"' +
-            ' data-format="' + escFmt + '"' +
-            ' data-method="' + m + '"' +
-            ' onclick="handlePayBtn(this)">' + m + '</button>';
-        }
-        payBtnsHtml += '</div>';
-
-        html += '<tr>' +
-          '<td>' + esc(reg.memberNumber) + '</td>' +
-          '<td>' + esc(reg.firstName || '') + '</td>' +
-          '<td>' + esc(reg.lastName || '') + '</td>' +
-          '<td class="sl-cell">' + esc(sl) + '</td>' +
-          '<td>' + payBtnsHtml + '</td>' +
-          '<td><div class="elig-circles">' +
-            '<button class="elig-circle elig-circle-yes' + (eligState === 'eligible' ? ' elig-active' : '') + '"' +
-              ' title="Eligible"' +
-              ' onclick="handleEligClick(this, \'' + escMem + '\', \'' + escDate + '\', \'' + escFmt + '\', \'eligible\')"' +
-              '>&#10003;</button>' +
-            '<button class="elig-circle elig-circle-no' + (eligState === 'ineligible' ? ' elig-active' : '') + '"' +
-              ' title="Ineligible"' +
-              ' onclick="handleEligClick(this, \'' + escMem + '\', \'' + escDate + '\', \'' + escFmt + '\', \'ineligible\')"' +
-              '>&#10005;</button>' +
-            '<button class="elig-circle elig-circle-maybe' + (eligState === '' ? ' elig-active' : '') + '"' +
-              ' title="Unconfirmed"' +
-              ' onclick="handleEligClick(this, \'' + escMem + '\', \'' + escDate + '\', \'' + escFmt + '\', \'\')"' +
-              '>?</button>' +
-          '</div></td>' +
-          '<td><button class="singles-btn' + (reg.singlesRegionals === 'yes' ? ' active' : '') + '"' +
-            ' data-member="' + escMem + '"' +
-            ' data-format="' + escFmt + '"' +
-            ' onclick="handleSinglesToggle(this)"' +
-            '>' + (reg.singlesRegionals === 'yes' ? '\u2605 YES' : '\u2606') + '</button></td>' +
-          '<td><button class="cancel-reg-btn"' +
-            ' title="Cancel Registration"' +
-            ' onclick="handleAdminCancel(\'' + escMem + '\', \'' +
-              escDate + '\', \'' + escFmt + '\')"' +
-            '>\u2715</button></td>' +
-        '</tr>';
-      }
-
-      html += '</tbody></table></div>';
-      container.innerHTML = html;
-    }
-
-
-    // ======================================================================
-    // Pending Eligibility — Filtered Overview
-    // ======================================================================
-
-    /**
-     * Renders a deduplicated view of registered players with at least
-     * one pending (unconfirmed) eligibility. Players fully resolved
-     * (all registered formats eligible or ineligible) are excluded.
-     */
-    function renderAllPlayersView(container) {
-      var playerMap = {};
-      var playerOrder = [];
-
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
-        var fmt = q.format;
-        var regs = q.registrations || [];
-
-        for (var r = 0; r < regs.length; r++) {
-          var reg = regs[r];
-          var mem = reg.memberNumber;
-
-          if (!playerMap[mem]) {
-            playerMap[mem] = {
-              memberNumber: mem,
-              firstName: reg.firstName,
-              lastName: reg.lastName,
-              elig8: '',
-              elig9: ''
-            };
-            playerOrder.push(mem);
-          }
-
-          if (fmt === '8' && !playerMap[mem]._seen8) {
-            playerMap[mem].elig8 = reg.eligibilityConfirmed || '';
-            playerMap[mem]._seen8 = true;
-          } else if (fmt === '9' && !playerMap[mem]._seen9) {
-            playerMap[mem].elig9 = reg.eligibilityConfirmed || '';
-            playerMap[mem]._seen9 = true;
-          }
-        }
-      }
-
-      // Filter to only players with at least one pending format
-      var pendingOrder = [];
-      for (var k = 0; k < playerOrder.length; k++) {
-        var pl = playerMap[playerOrder[k]];
-        var has8Pending = pl._seen8 && !pl.elig8;
-        var has9Pending = pl._seen9 && !pl.elig9;
-        if (has8Pending || has9Pending) {
-          pendingOrder.push(playerOrder[k]);
-        }
-      }
-
-      if (pendingOrder.length === 0) {
-        container.innerHTML =
-          '<div class="admin-empty">All caught up \u2014 no pending eligibility reviews.</div>';
-        return;
-      }
-
-      // Sort alphabetically by last name, then first name
-      pendingOrder.sort(function(a, b) {
-        var pa = playerMap[a], pb = playerMap[b];
-        var lastA = (pa.lastName || '').toLowerCase();
-        var lastB = (pb.lastName || '').toLowerCase();
-        if (lastA !== lastB) return lastA < lastB ? -1 : 1;
-        var firstA = (pa.firstName || '').toLowerCase();
-        var firstB = (pb.firstName || '').toLowerCase();
-        return firstA < firstB ? -1 : (firstA > firstB ? 1 : 0);
-      });
-
-      // Build table
-      var html =
-        '<div class="reg-table-wrap"><table class="reg-table">' +
-        '<thead><tr>' +
-          '<th>Member #</th>' +
-          '<th>Player Name</th>' +
-          '<th style="text-align:center;">8-Ball</th>' +
-          '<th style="text-align:center;">9-Ball</th>' +
-        '</tr></thead><tbody>';
-
-      for (var p = 0; p < pendingOrder.length; p++) {
-        var player = playerMap[pendingOrder[p]];
-        var fullName = (player.firstName + ' ' + player.lastName).trim();
-        var escMem = esc(player.memberNumber);
-
-        var circles8 = player._seen8
-          ? buildEligCircles_(escMem, '8', player.elig8)
-          : '<span style="color:var(--muted);">\u2014</span>';
-        var circles9 = player._seen9
-          ? buildEligCircles_(escMem, '9', player.elig9)
-          : '<span style="color:var(--muted);">\u2014</span>';
-
-        html += '<tr>' +
-          '<td>' + escMem + '</td>' +
-          '<td>' + esc(fullName) + '</td>' +
-          '<td>' + circles8 + '</td>' +
-          '<td>' + circles9 + '</td>' +
-        '</tr>';
-      }
-
-      html += '</tbody></table></div>';
-      container.innerHTML = html;
-    }
-
-    /**
-     * Builds HTML for 3 eligibility circle buttons for a member + format.
-     * In "All Players" view, qualDate is 'ALL'.
-     */
-    function buildEligCircles_(escMem, format, eligState) {
-      var escFmt = esc(format);
-      return '<div class="elig-circles">' +
-        '<button class="elig-circle elig-circle-yes' + (eligState === 'eligible' ? ' elig-active' : '') + '"' +
-          ' title="Eligible"' +
-          ' onclick="handleEligClick(this, \'' + escMem + '\', \'ALL\', \'' + escFmt + '\', \'eligible\')"' +
-          '>&#10003;</button>' +
-        '<button class="elig-circle elig-circle-no' + (eligState === 'ineligible' ? ' elig-active' : '') + '"' +
-          ' title="Ineligible"' +
-          ' onclick="handleEligClick(this, \'' + escMem + '\', \'ALL\', \'' + escFmt + '\', \'ineligible\')"' +
-          '>&#10005;</button>' +
-        '<button class="elig-circle elig-circle-maybe' + (eligState === '' ? ' elig-active' : '') + '"' +
-          ' title="Unconfirmed"' +
-          ' onclick="handleEligClick(this, \'' + escMem + '\', \'ALL\', \'' + escFmt + '\', \'\')"' +
-          '>?</button>' +
-      '</div>';
-    }
-
-
-    // ======================================================================
-    // Eligibility Queue — non-blocking, serial processing with retry
-    // ======================================================================
-    //
-    // Clicks are instant (optimistic UI), server calls process one-at-a-time
-    // in FIFO order, with automatic retry on failure.
-
-    var _eligQueue = [];
-    var _eligQueueProcessing = false;
-    var _eligQueueId = 0;
-
-    /**
-     * Click handler for eligibility circles. Immediately updates UI,
-     * enqueues server call, never blocks.
-     */
-    function handleEligClick(btn, memberNumber, qualDate, format, newState) {
-      // Optimistic UI: move .elig-active to clicked circle
-      var container = btn.parentElement;
-      if (container) {
-        var circles = container.querySelectorAll('.elig-circle');
-        for (var c = 0; c < circles.length; c++) {
-          circles[c].classList.remove('elig-active');
-        }
-      }
-      btn.classList.add('elig-active');
-
-      // Update cache so re-renders show the new state
-      updateCachedEligibility(memberNumber, format, newState);
-      populateEventDropdown(adminData.qualifiers);
-
-      // Enqueue server call
-      _enqueueElig(memberNumber, qualDate, format, newState);
-    }
-
-    function _enqueueElig(memberNumber, qualDate, format, newState) {
-      _eligQueueId++;
-      _eligQueue.push({
-        id: _eligQueueId,
-        memberNumber: memberNumber,
-        qualDate: qualDate,
-        format: format,
-        newState: newState,
-        retries: 0
-      });
-      _updateEligQueueToast();
-      if (!_eligQueueProcessing) {
-        _eligQueueProcessing = true;
-        _processEligQueue();
-      }
-    }
-
-    async function _processEligQueue() {
-      if (_eligQueue.length === 0) {
-        _eligQueueProcessing = false;
-        _updateEligQueueToast();
-        return;
-      }
-      var item = _eligQueue[0];
-      _updateEligQueueToast();
-
-      try {
-        var result = await callServer('toggleEligibility', {
-          memberNumber: item.memberNumber,
-          qualDate: item.qualDate,
-          format: item.format,
-          newState: item.newState
-        });
-
-        if (!result || !result.success) {
-          _handleEligQueueFailure(item, (result && result.error) || 'Unknown error');
-          return;
-        }
-
-        // Success — dequeue and process next
-        _eligQueue.shift();
-        _updateEligQueueToast();
-        _processEligQueue();
-
-      } catch (err) {
-        _handleEligQueueFailure(item, String(err));
-      }
-    }
-
-    function _handleEligQueueFailure(item, errMsg) {
-      item.retries++;
-      if (item.retries >= 3) {
-        // Give up — remove from queue, alert user
-        _eligQueue.shift();
-        _updateEligQueueToast();
-        console.error('Eligibility update failed after 3 retries:', errMsg, item);
-        alert('Eligibility update failed for member ' + item.memberNumber + ': ' + errMsg);
-        renderSelectedEvent();
-        _processEligQueue();
-      } else {
-        // Retry with backoff
-        _updateEligQueueToast();
-        setTimeout(function() {
-          _processEligQueue();
-        }, item.retries * 2000);
-      }
-    }
-
-    function _updateEligQueueToast() {
-      var el = document.getElementById('eligQueueToast');
-      if (!el) return;
-      if (_eligQueue.length === 0) {
-        el.style.display = 'none';
-        el.classList.remove('retrying');
-        return;
-      }
-      el.style.display = 'block';
-      var item = _eligQueue[0];
-      if (item.retries > 0) {
-        el.classList.add('retrying');
-        el.textContent = 'Retrying eligibility (' + item.retries + '/3)\u2026 ' + _eligQueue.length + ' pending';
-      } else {
-        el.classList.remove('retrying');
-        el.textContent = 'Saving ' + _eligQueue.length + ' eligibility update' + (_eligQueue.length > 1 ? 's' : '') + '\u2026';
-      }
-    }
-
-
-    // ======================================================================
-    // Payment Method Button Handler
-    // ======================================================================
-
-    /**
-     * Handles an inline payment-method button click.
-     *
-     * Each row has 4 buttons: Cash, CashApp, Venmo, PayPal.
-     * At most ONE is active (green) at a time — the current payment method.
-     *
-     * CLICK INACTIVE BUTTON → mark paid with that method (or switch method).
-     * CLICK ACTIVE BUTTON   → confirm undo, then clear payment.
-     *
-     * Optimistic UI update; server confirmation; rollback on failure.
-     */
-    function handlePayBtn(btn) {
-      var memberNumber  = btn.getAttribute('data-member');
-      var qualDate      = btn.getAttribute('data-date');
-      var format        = btn.getAttribute('data-format');
-      var method        = btn.getAttribute('data-method');
-      var isActive      = btn.classList.contains('active');
-      var playerName    = findPlayerName_(memberNumber);
-
-      // Disable all 4 buttons in this row while processing
-      var siblings = btn.parentElement.querySelectorAll('.pay-btn');
-      for (var s = 0; s < siblings.length; s++) siblings[s].disabled = true;
-
-      if (isActive) {
-        // UNDO: clicking the active method button → confirm, then clear
-        showConfirmModal('Undo Payment', 'Undo payment for ' + playerName + '?', 'Yes, Undo', function() {
-          executePayToggle(btn, memberNumber, qualDate, format, '', siblings);
-        });
-        // If modal is cancelled, re-enable buttons
-        btn._pendingModal = true;
-        return;
-      }
-
-      // FORWARD: mark paid (or switch method) — no confirmation needed
-      executePayToggle(btn, memberNumber, qualDate, format, method, siblings);
-    }
-
-    /**
-     * Executes the pay toggle after optional confirmation.
-     * @param {HTMLElement} btn       - The clicked pay-method button
-     * @param {string} memberNumber   - APA member number
-     * @param {string} qualDate       - Qualifier date display string
-     * @param {string} format         - "8" or "9"
-     * @param {string} paymentMethod  - Method string, or "" to clear
-     * @param {NodeList} siblings     - All 4 pay-btn elements in this row
-     */
-    async function executePayToggle(btn, memberNumber, qualDate, format, paymentMethod, siblings) {
-      // Snapshot previous state for rollback
-      var prevActive = btn.parentElement.querySelector('.pay-btn.active');
-      var prevMethod = prevActive ? prevActive.getAttribute('data-method') : '';
-
-      // Optimistic UI: clear all active, then set the new one
-      for (var i = 0; i < siblings.length; i++) siblings[i].classList.remove('active');
-      if (paymentMethod) {
-        btn.classList.add('active');
-      }
-
-      try {
-        var result = await callServer('togglePrePaid', {
-          memberNumber: memberNumber,
-          qualDate: qualDate,
-          format: format,
-          paymentMethod: paymentMethod
-        });
-
-        if (!result || !result.success) {
-          // Server rejected — revert to previous state
-          for (var j = 0; j < siblings.length; j++) siblings[j].classList.remove('active');
-          if (prevActive) prevActive.classList.add('active');
-          alert('Payment toggle failed: ' + ((result && result.error) || 'Unknown error'));
-        } else {
-          // Server confirmed — update local cache.
-          // PaymentMethod is the source of truth for paid status.
-          // Also sync prePaid for backward compat with legacy code paths.
-          updateCachedRegistration(memberNumber, qualDate, format, 'prePaid', result.newValue);
-          updateCachedPaymentMethod(memberNumber, qualDate, format, result.paymentMethod || '');
-
-          // Clear legacy-paid amber styling once a method is assigned
-          if (result.paymentMethod) {
-            btn.parentElement.classList.remove('legacy-paid');
-          }
-        }
-
-      } catch (err) {
-        // Network error — revert
-        for (var k = 0; k < siblings.length; k++) siblings[k].classList.remove('active');
-        if (prevActive) prevActive.classList.add('active');
-        alert('Payment toggle failed. Please try again.');
-      } finally {
-        for (var e = 0; e < siblings.length; e++) siblings[e].disabled = false;
-      }
-    }
-
-
-    // ======================================================================
-    // Singles Regionals Toggle Handler
-    // ======================================================================
-
-    /**
-     * Handles the Singles Regionals toggle button click.
-     * Simple yes/"" toggle — gold star when qualified, gray when not.
-     * Optimistic UI with server confirmation + rollback on failure.
-     */
-    async function handleSinglesToggle(btn) {
-      var memberNumber = btn.getAttribute('data-member');
-      var format       = btn.getAttribute('data-format');
-      var isActive     = btn.classList.contains('active');
-      var newValue     = isActive ? '' : 'yes';
-
-      // Optimistic UI
-      btn.disabled = true;
-      if (newValue === 'yes') {
-        btn.classList.add('active');
-        btn.innerHTML = '\u2605 YES';
-      } else {
-        btn.classList.remove('active');
-        btn.innerHTML = '\u2606';
-      }
-
-      try {
-        var result = await callServer('toggleSinglesRegionals', {
-          memberNumber: memberNumber,
-          format: format,
-          newValue: newValue
-        });
-
-        if (!result || !result.success) {
-          // Revert
-          if (isActive) {
-            btn.classList.add('active');
-            btn.innerHTML = '\u2605 YES';
-          } else {
-            btn.classList.remove('active');
-            btn.innerHTML = '\u2606';
-          }
-          alert('Singles Regionals update failed: ' + ((result && result.error) || 'Unknown error'));
-        } else {
-          // Update local cache
-          updateCachedSinglesRegionals(memberNumber, format, result.newValue);
-        }
-
-      } catch (err) {
-        // Revert
-        if (isActive) {
-          btn.classList.add('active');
-          btn.innerHTML = '\u2605 YES';
-        } else {
-          btn.classList.remove('active');
-          btn.innerHTML = '\u2606';
-        }
-        alert('Singles Regionals update failed. Please try again.');
-      } finally {
-        btn.disabled = false;
-      }
-    }
-
-    /**
-     * Updates the cached singlesRegionals field for a member across all
-     * qualifiers of the same format (since it's per-member per-format).
-     */
-    function updateCachedSinglesRegionals(memberNumber, format, newValue) {
-      if (!adminData || !adminData.qualifiers) return;
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
-        if (q.format !== format) continue;
-        var regs = q.registrations || [];
-        for (var r = 0; r < regs.length; r++) {
-          if (regs[r].memberNumber === memberNumber) {
-            regs[r].singlesRegionals = newValue;
-          }
-        }
-      }
-    }
-
-
-    // ======================================================================
-    // Cache Helpers
-    // ======================================================================
-
-    /**
-     * Finds a player's display name from cached admin data.
-     */
-    function findPlayerName_(memberNumber) {
-      if (!adminData || !adminData.qualifiers) return 'Unknown';
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var regs = adminData.qualifiers[i].registrations || [];
-        for (var r = 0; r < regs.length; r++) {
-          if (regs[r].memberNumber === memberNumber) {
-            return (regs[r].firstName + ' ' + regs[r].lastName).trim() || 'Unknown';
-          }
-        }
-      }
-      return 'Unknown';
-    }
-
-    /**
-     * Updates the cached registration for a specific field (e.g., prePaid).
-     */
-    function updateCachedRegistration(memberNumber, qualDate, format, field, newValue) {
-      if (!adminData || !adminData.qualifiers) return;
-      var key = qualDate + '|' + format;
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
-        if ((q.dateDisplay + '|' + q.format) === key) {
-          var regs = q.registrations || [];
-          for (var r = 0; r < regs.length; r++) {
-            if (regs[r].memberNumber === memberNumber) {
-              if (field === 'prePaid') regs[r].prePaid = newValue;
-              return;
-            }
-          }
-        }
-      }
-    }
-
-    /**
-     * Updates eligibility for a member across ALL events of the same format.
-     * Eligibility is per-member per-format, not per-event.
-     */
-    function updateCachedEligibility(memberNumber, format, newValue) {
-      if (!adminData || !adminData.qualifiers) return;
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
-        if (q.format === format) {
-          var regs = q.registrations || [];
-          for (var r = 0; r < regs.length; r++) {
-            if (regs[r].memberNumber === memberNumber) {
-              regs[r].eligibilityConfirmed = newValue;
-            }
-          }
-        }
-      }
-    }
-
-    // paidLabel_() REMOVED — no longer needed. Each payment method has
-    // its own button, so the method is self-evident from which is active.
-
-    /**
-     * Looks up cached payment method for a registration.
-     */
-    function findPaymentMethod_(memberNumber, qualDate, format) {
-      if (!adminData || !adminData.qualifiers) return '';
-      var key = qualDate + '|' + format;
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
-        if ((q.dateDisplay + '|' + q.format) === key) {
-          var regs = q.registrations || [];
-          for (var r = 0; r < regs.length; r++) {
-            if (regs[r].memberNumber === memberNumber) {
-              return regs[r].paymentMethod || '';
-            }
-          }
-        }
-      }
-      return '';
-    }
-
-    /**
-     * Updates cached paymentMethod for a registration.
-     */
-    function updateCachedPaymentMethod(memberNumber, qualDate, format, method) {
-      if (!adminData || !adminData.qualifiers) return;
-      var key = qualDate + '|' + format;
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
-        if ((q.dateDisplay + '|' + q.format) === key) {
-          var regs = q.registrations || [];
-          for (var r = 0; r < regs.length; r++) {
-            if (regs[r].memberNumber === memberNumber) {
-              regs[r].paymentMethod = method;
-              return;
-            }
-          }
-        }
-      }
-    }
-
-
-    // ======================================================================
-    // Admin Cancel Registration
-    // ======================================================================
-
-    /**
-     * Handles admin-initiated cancellation. Shows confirm modal first,
-     * then calls adminCancelRegistration on the server.
-     */
-    function handleAdminCancel(memberNumber, qualDate, format) {
-      var playerName = findPlayerName_(memberNumber);
-      var formatName = format === '8' ? '8-Ball' : '9-Ball';
-
-      showConfirmModal(
-        'Cancel Registration',
-        'Cancel ' + playerName + '\'s registration for ' + formatName + ' on ' + qualDate + '?\n\nThis will send them a cancellation email.',
-        'Yes, Cancel',
-        async function() {
-          try {
-            var result = await callServer('adminCancelRegistration', {
-              memberNumber: memberNumber,
-              qualDate: qualDate,
-              format: format
-            });
-
-            if (!result || !result.success) {
-              alert('Cancel failed: ' + ((result && result.error) || 'Unknown error'));
-              return;
-            }
-
-            // Remove from cache and re-render
-            removeCachedRegistration_(memberNumber, qualDate, format);
-            renderSelectedEvent();
-            updateTotalBar_();
-
-          } catch (err) {
-            alert('Cancel failed. Please try again.');
-          }
-        }
-      );
-    }
-
-    function removeCachedRegistration_(memberNumber, qualDate, format) {
-      if (!adminData || !adminData.qualifiers) return;
-      var key = qualDate + '|' + format;
-      for (var i = 0; i < adminData.qualifiers.length; i++) {
-        var q = adminData.qualifiers[i];
-        if ((q.dateDisplay + '|' + q.format) === key) {
-          q.registrations = (q.registrations || []).filter(function(reg) {
-            return reg.memberNumber !== memberNumber;
-          });
-          q.registrationCount = q.registrations.length;
-          break;
-        }
-      }
-      if (adminData.totalRegistrations > 0) {
-        adminData.totalRegistrations--;
-      }
-    }
-
-    function updateTotalBar_() {
-      if (!adminData) return;
-      var totalBar = document.getElementById('totalBar');
-      totalBar.textContent = adminData.totalRegistrations + ' total registration' +
-        (adminData.totalRegistrations !== 1 ? 's' : '') + ' across ' +
-        adminData.qualifiers.length + ' event' + (adminData.qualifiers.length !== 1 ? 's' : '');
-      populateEventDropdown(adminData.qualifiers);
-    }
-
-
-    // ======================================================================
-    // CSV Export
-    // ======================================================================
-
-    /**
-     * Exports registration data as a CSV file (client-side Blob download).
-     * If a specific qualifier is selected, exports only that qualifier's data.
-     * If "Pending Eligibility" or no selection, exports all qualifiers.
-     */
-    function exportCsv() {
-      if (!adminData || !adminData.qualifiers) {
-        alert('No data to export. Please refresh first.');
-        return;
-      }
-
-      // Determine which qualifiers to export based on current selection
-      var select = document.getElementById('eventSelect');
-      var selectedValue = select ? select.value : '';
-      var qualsToExport = [];
-      var fileLabel = 'all';
-
-      if (selectedValue && selectedValue !== '__pending__') {
-        // Specific qualifier selected — export only that one
-        var parts = selectedValue.split('|');
-        var selDate = parts[0];
-        var selFmt  = parts[1];
-        for (var qi = 0; qi < adminData.qualifiers.length; qi++) {
-          var candidate = adminData.qualifiers[qi];
-          if (candidate.dateDisplay === selDate && candidate.format === selFmt) {
-            qualsToExport.push(candidate);
-            fileLabel = selDate.replace(/[^a-zA-Z0-9]/g, '-') + '-' + candidate.formatDisplay;
-            break;
-          }
-        }
-      } else {
-        // All qualifiers
-        qualsToExport = adminData.qualifiers;
-      }
-
-      var headers = [
-        'Event Date', 'Format', 'Location', 'First Name', 'Last Name',
-        'Member Number', 'Email', 'Phone', '8-Ball SL', '9-Ball SL',
-        'Payment Method', 'Eligibility', 'Singles Regionals', 'Registered At'
-      ];
-
-      var rows = [headers.join(',')];
-
-      for (var i = 0; i < qualsToExport.length; i++) {
-        var q = qualsToExport[i];
-        var regs = q.registrations || [];
-
-        for (var r = 0; r < regs.length; r++) {
-          var reg = regs[r];
-          rows.push([
-            csvEscape(q.dateDisplay),
-            csvEscape(q.formatDisplay),
-            csvEscape(q.locationName),
-            csvEscape(reg.firstName || ''),
-            csvEscape(reg.lastName || ''),
-            csvEscape(reg.memberNumber),
-            csvEscape((reg.email || '').replace(/\s/g, '')),
-            csvEscape(reg.phone),
-            csvEscape(reg.sl8 || ''),
-            csvEscape(reg.sl9 || ''),
-            csvEscape(reg.paymentMethod || ''),
-            csvEscape(reg.eligibilityConfirmed || ''),
-            csvEscape(reg.singlesRegionals === 'yes' ? 'Yes' : ''),
-            csvEscape(reg.registeredAt)
-          ].join(','));
-        }
-      }
-
-      var csv = rows.join('\n');
-      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      var url = URL.createObjectURL(blob);
-      var link = document.createElement('a');
-      link.href = url;
-      link.download = 'multipass-' + fileLabel + '.csv';
-      link.click();
-      URL.revokeObjectURL(url);
-    }
-
-    function csvEscape(val) {
-      var str = String(val || '');
-      if (str.indexOf(',') !== -1 || str.indexOf('"') !== -1 || str.indexOf('\n') !== -1) {
-        return '"' + str.replace(/"/g, '""') + '"';
-      }
-      return str;
-    }
-
-
-    // ======================================================================
-    // Tab Switching
-    // ======================================================================
-
-    var activeTab = 'registrations';
-
-    /**
-     * Switches between Registrations and Qualifiers views.
-     */
-    function switchTab(tab) {
-      activeTab = tab;
-
-      var regView = document.getElementById('registrationsView');
-      var qualView = document.getElementById('qualifiersView');
-      var tabReg = document.getElementById('tabRegistrations');
-      var tabQual = document.getElementById('tabQualifiers');
-
-      if (tab === 'qualifiers') {
-        regView.style.display = 'none';
-        qualView.style.display = '';
-        tabReg.classList.remove('active');
-        tabQual.classList.add('active');
-        renderQualifiersList();
-        loadMaintenanceState();
-      } else {
-        regView.style.display = '';
-        qualView.style.display = 'none';
-        tabReg.classList.add('active');
-        tabQual.classList.remove('active');
-      }
-    }
-
-
-    // ======================================================================
-    // Qualifiers View — Card List
-    // ======================================================================
-
-    /**
-     * Renders qualifier cards from adminData into the qualifiers container.
-     * Each card: date, format badge, time, location, cutoff, reg count,
-     * edit/delete buttons.
-     */
-    // ── Qualifier time-window filter ─────────────────────────────
-    var qualFilterMode = 'upcoming'; // default tab
-
-    function renderQualFilterTabs() {
-      var tabs = [
-        { key: 'upcoming', label: 'Upcoming' },
-        { key: '30',  label: '30d' },
-        { key: '60',  label: '60d' },
-        { key: '90',  label: '90d' },
-        { key: '180', label: '6mo' },
-        { key: '365', label: '12mo' },
-        { key: 'all', label: 'All' }
-      ];
-      var html = '';
-      for (var t = 0; t < tabs.length; t++) {
-        var cls = tabs[t].key === qualFilterMode ? ' active' : '';
-        html += '<button class="qual-filter-tab' + cls + '" onclick="setQualFilter(\'' + tabs[t].key + '\')">' + tabs[t].label + '</button>';
-      }
-      document.getElementById('qualFilterTabs').innerHTML = html;
-    }
-
-    function setQualFilter(mode) {
-      qualFilterMode = mode;
-      renderQualFilterTabs();
-      renderQualifiersList();
-    }
-
-    function filterQualifiers(qualifiers) {
-      var now = new Date();
-      if (qualFilterMode === 'upcoming') {
-        return qualifiers.filter(function(q) { return !q.isPast; });
-      }
-      if (qualFilterMode === 'all') return qualifiers;
-      // Past N days: show upcoming + past within the window
-      var days = parseInt(qualFilterMode, 10);
-      var cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-      return qualifiers.filter(function(q) {
-        if (!q.isPast) return true; // always show upcoming
-        // Use startISO for reliable date comparison
-        var eventDate = q.startISO ? new Date(q.startISO) : null;
-        if (!eventDate) return false;
-        return eventDate >= cutoff;
-      });
-    }
-
-    function renderQualifiersList() {
-      var container = document.getElementById('qualifiersList');
-      renderQualFilterTabs();
-
-      if (!adminData || !adminData.qualifiers || adminData.qualifiers.length === 0) {
-        container.innerHTML = '<div class="admin-empty">No qualifiers configured yet.</div>';
-        return;
-      }
-
-      var filtered = filterQualifiers(adminData.qualifiers);
-
-      if (filtered.length === 0) {
-        container.innerHTML = '<div class="admin-empty">No qualifiers match this filter.</div>';
-        return;
-      }
-
-      var html = '';
-      for (var i = 0; i < filtered.length; i++) {
-        var q = filtered[i];
-        // Find the original index in adminData.qualifiers for onclick references
-        var origIdx = adminData.qualifiers.indexOf(q);
-        var fmtClass = q.format === '8' ? 'fmt-8' : 'fmt-9';
-        var fmtLabel = q.format === '8' ? '8-Ball' : '9-Ball';
-        var regCount = q.registrationCount || 0;
-        var hasRegs = regCount > 0;
-        var pastClass = q.isPast ? ' past' : '';
-
-        var cutoffHtml = '';
-        if (q.cutoffDisplay) {
-          cutoffHtml = '<div><strong>Cutoff:</strong> ' + esc(q.cutoffDisplay) + '</div>';
-        }
-
-        html += '<div class="qualifier-card' + pastClass + '">' +
-          '<div class="qualifier-card-header">' +
-            '<span class="qualifier-card-date">' + esc(q.dateDisplay) + '</span>' +
-            '<span class="format-badge ' + fmtClass + '">' + esc(fmtLabel) + '</span>' +
-          '</div>' +
-          '<div class="qualifier-card-detail">' +
-            '<div>' + esc(q.timeDisplay || '') + '</div>' +
-            '<div><strong>' + esc(q.locationName || '') + '</strong></div>' +
-            '<div>' + esc(q.locationAddress || '') + '</div>' +
-            cutoffHtml +
-            '<div>' + regCount + ' registration' + (regCount !== 1 ? 's' : '') + '</div>' +
-          '</div>';
-
-        // Past qualifiers: read-only (no edit/delete)
-        if (!q.isPast) {
-          html += '<div class="qualifier-card-actions">' +
-              '<button class="qual-edit-btn" onclick="showQualifierModal(adminData.qualifiers[' + origIdx + '])">Edit</button>' +
-              '<button class="qual-delete-btn"' +
-                (hasRegs ? ' disabled title="Cannot delete \u2014 has ' + regCount + ' registration' + (regCount !== 1 ? 's' : '') + '"' : '') +
-                ' onclick="handleDeleteQualifier(\'' + esc(q.dateDisplay) + '\', \'' + esc(q.format) + '\')">Delete</button>' +
-            '</div>';
-        }
-
-        html += '</div>';
-      }
-
-      container.innerHTML = html;
-    }
-
-
-    // ======================================================================
-    // Qualifier Add/Edit Modal
-    // ======================================================================
-
-    /** If editing, stores { dateDisplay, format } of the original. Null = adding. */
-    var _qualEditingOriginal = null;
-
-    /** Currently selected format in the modal ('8' or '9'). */
-    var _qualSelectedFormat = '';
-
-    /**
-     * Shows the qualifier add/edit modal.
-     * If qualifier is null, shows an empty "Add" form.
-     * If qualifier is an object, pre-populates all fields for editing.
-     */
-    function showQualifierModal(qualifier) {
-      var title = qualifier ? 'Edit Qualifier' : 'Add Qualifier';
-      document.getElementById('qualModalTitle').textContent = title;
-
-      if (qualifier) {
-        _qualEditingOriginal = {
-          dateDisplay: qualifier.dateDisplay,
-          format: qualifier.format
-        };
-        document.getElementById('qualStartInput').value = qualifier.startISO || '';
-        document.getElementById('qualEndInput').value = qualifier.endISO || '';
-        document.getElementById('qualCutoffInput').value = qualifier.cutoffISO || '';
-        document.getElementById('qualLocationName').value = qualifier.locationName || '';
-        document.getElementById('qualLocationAddress').value = qualifier.locationAddress || '';
-        document.getElementById('qualEntryFee').value = qualifier.entryFee != null ? qualifier.entryFee : 50;
-        document.getElementById('qualGreensFee').value = qualifier.greensFee != null ? qualifier.greensFee : 3;
-        selectQualFormat(qualifier.format);
-      } else {
-        _qualEditingOriginal = null;
-        document.getElementById('qualStartInput').value = '';
-        document.getElementById('qualEndInput').value = '';
-        document.getElementById('qualCutoffInput').value = '';
-        document.getElementById('qualLocationName').value = '';
-        document.getElementById('qualLocationAddress').value = '';
-        document.getElementById('qualEntryFee').value = 50;
-        document.getElementById('qualGreensFee').value = 3;
-        selectQualFormat('');
-      }
-
-      document.getElementById('qualifierModal').style.display = 'flex';
-    }
-
-    function closeQualifierModal() {
-      document.getElementById('qualifierModal').style.display = 'none';
-      _qualEditingOriginal = null;
-      _qualSelectedFormat = '';
-    }
-
-    /**
-     * Selects a format in the qualifier modal's format toggle.
-     */
-    function selectQualFormat(fmt) {
-      _qualSelectedFormat = fmt;
-      var btn8 = document.getElementById('fmtBtn8');
-      var btn9 = document.getElementById('fmtBtn9');
-      btn8.classList.remove('active-8');
-      btn9.classList.remove('active-9');
-      if (fmt === '8') btn8.classList.add('active-8');
-      if (fmt === '9') btn9.classList.add('active-9');
-    }
-
-    /**
-     * Reads form values and calls addQualifier or updateQualifier.
-     * Reloads admin data on success.
-     */
-    async function saveQualifier() {
-      var start = document.getElementById('qualStartInput').value;
-      var end = document.getElementById('qualEndInput').value;
-      var format = _qualSelectedFormat;
-      var locationName = document.getElementById('qualLocationName').value.trim();
-      var locationAddress = document.getElementById('qualLocationAddress').value.trim();
-      var cutoff = document.getElementById('qualCutoffInput').value;
-
-      if (!start || !end || !format || !locationName) {
-        alert('Please fill in Start, End, Format, and Location Name.');
-        return;
-      }
-
-      var entryFee = document.getElementById('qualEntryFee').value;
-      var greensFee = document.getElementById('qualGreensFee').value;
-
-      var qualData = {
-        start: start,
-        end: end,
-        format: format,
-        locationName: locationName,
-        locationAddress: locationAddress,
-        cutoff: cutoff,
-        entryFee: entryFee,
-        greensFee: greensFee
-      };
-
-      try {
-        var result;
-        if (_qualEditingOriginal) {
-          result = await callServer('updateQualifier', {
-            originalDateDisplay: _qualEditingOriginal.dateDisplay,
-            originalFormat: _qualEditingOriginal.format,
-            qualData: qualData
-          });
-        } else {
-          result = await callServer('addQualifier', {
-            qualData: qualData
-          });
-        }
-
-        if (!result || !result.success) {
-          alert('Save failed: ' + ((result && result.error) || 'Unknown error'));
-          return;
-        }
-
-        closeQualifierModal();
-        await loadAdminData();
-        switchTab('qualifiers');
-
-      } catch (err) {
-        alert('Save failed. Please try again.');
-      }
-    }
-
-
-    // ======================================================================
-    // Qualifier Delete
-    // ======================================================================
-
-    /**
-     * Handles deleting a qualifier. Confirm modal first, then server call.
-     */
-    function handleDeleteQualifier(dateDisplay, format) {
-      var formatName = format === '8' ? '8-Ball' : '9-Ball';
-      showConfirmModal(
-        'Delete Qualifier',
-        'Delete the ' + formatName + ' qualifier on ' + dateDisplay + '?\n\nThis cannot be undone.',
-        'Yes, Delete',
-        async function() {
-          try {
-            var result = await callServer('deleteQualifier', {
-              dateDisplay: dateDisplay,
-              format: format
-            });
-            if (!result || !result.success) {
-              alert('Delete failed: ' + ((result && result.error) || 'Unknown error'));
-              return;
-            }
-            await loadAdminData();
-            switchTab('qualifiers');
-          } catch (err) {
-            alert('Delete failed. Please try again.');
-          }
-        }
-      );
-    }
-
-
-    // ======================================================================
-    // Maintenance Mode
-    // ======================================================================
-
-    /**
-     * Loads maintenance state from adminData and sets checkbox.
-     */
-    function loadMaintenanceState() {
-      if (!adminData) return;
-      var checkbox = document.getElementById('maintenanceCheckbox');
-      var keyDisplay = document.getElementById('bypassKeyDisplay');
-
-      var isEnabled = adminData.maintenanceMode || false;
-      checkbox.checked = isEnabled;
-
-      if (isEnabled && adminData.bypassKey) {
-        keyDisplay.textContent = 'Bypass key: ' + adminData.bypassKey;
-        keyDisplay.style.display = '';
-      } else {
-        keyDisplay.style.display = 'none';
-      }
-    }
-
-    /**
-     * Called when maintenance checkbox changes. Calls setMaintenanceMode.
-     */
-    async function toggleMaintenance() {
-      var checkbox = document.getElementById('maintenanceCheckbox');
-      var keyDisplay = document.getElementById('bypassKeyDisplay');
-      var enabled = checkbox.checked;
-
-      try {
-        var result = await callServer('setMaintenanceMode', {
-          enabled: enabled
-        });
-
-        if (!result || !result.success) {
-          checkbox.checked = !enabled;
-          alert('Failed: ' + ((result && result.error) || 'Unknown error'));
-          return;
-        }
-
-        adminData.maintenanceMode = enabled;
-
-        if (enabled && result.bypassKey) {
-          adminData.bypassKey = result.bypassKey;
-          keyDisplay.textContent = 'Bypass key: ' + result.bypassKey;
-          keyDisplay.style.display = '';
-        } else {
-          keyDisplay.style.display = 'none';
-        }
-
-      } catch (err) {
-        checkbox.checked = !enabled;
-        alert('Failed to toggle maintenance mode. Please try again.');
-      }
-    }
-
-
-    // ======================================================================
-    // Initialization
-    // ======================================================================
-
-    document.addEventListener('DOMContentLoaded', function() {
-
-      // -- Auth gate: check for admin token --
-      if (!adminToken) {
-        document.getElementById('authError').style.display = '';
-        document.getElementById('mainContent').style.display = 'none';
-        return;
-      }
-
-      // Token present — show main content
-      document.getElementById('authError').style.display = 'none';
-      document.getElementById('mainContent').style.display = '';
-
-      // -- Confirm modal event wiring --
-
-      document.getElementById('confirmYes').addEventListener('click', function() {
-        if (pendingConfirm) {
-          var fn = pendingConfirm;
-          closeConfirmModal();
-          fn();
-        }
-      });
-
-      document.getElementById('confirmNo').addEventListener('click', function() {
-        reEnablePendingButton_();
-        closeConfirmModal();
-      });
-
-      document.getElementById('confirmModal').addEventListener('click', function(e) {
-        if (e.target && e.target.id === 'confirmModal') {
-          reEnablePendingButton_();
-          closeConfirmModal();
-        }
-      });
-
-      // Payment method modal wiring REMOVED — inline buttons handle
-      // their own click events via onclick="handlePayBtn(this)".
-
-      // -- Qualifier modal backdrop click --
-      document.getElementById('qualifierModal').addEventListener('click', function(e) {
-        if (e.target && e.target.id === 'qualifierModal') {
-          closeQualifierModal();
-        }
-      });
-
-      // -- Load data --
-      loadAdminData();
+    return guess.toISOString();
+  }
+  function money(n) { var v = Number(n || 0); return '$' + (v % 1 ? v.toFixed(2) : String(v)); }
+
+  // ── Sign-in ─────────────────────────────────────────────────────────────
+  function showSignin(m) {
+    $('signin').classList.remove('hide');
+    $('console').classList.add('hide');
+    if (m) say('signin-msg', 'info', m);
+  }
+  function showConsole() {
+    $('signin').classList.add('hide');
+    $('console').classList.remove('hide');
+  }
+  function signOut(m) {
+    token = null;
+    try { sessionStorage.removeItem(SKEY); } catch (e) {}
+    showSignin(m || 'Signed out.');
+  }
+
+  $('btn-link').addEventListener('click', function () {
+    var b = $('btn-link');
+    b.disabled = true; b.textContent = 'Sending…';
+    post({ action: 'sqa_link_request' }).then(function (j) {
+      b.disabled = false; b.textContent = 'Email me a sign-in link';
+      if (j && j.ok) say('signin-msg', 'ok', 'Sent. Check the league inbox — the link lasts 15 minutes.');
+      else say('signin-msg', 'bad', (j && j.error) || 'Could not send the link.');
+    }).catch(function () {
+      b.disabled = false; b.textContent = 'Email me a sign-in link';
+      say('signin-msg', 'bad', 'Could not reach the server.');
     });
+  });
 
-    /**
-     * Re-enables pay-method buttons that triggered a confirm modal
-     * (if user cancels the undo confirmation).
-     */
-    function reEnablePendingButton_() {
-      var buttons = document.querySelectorAll('.pay-btn');
-      for (var i = 0; i < buttons.length; i++) {
-        if (buttons[i]._pendingModal) {
-          buttons[i].disabled = false;
-          buttons[i]._pendingModal = false;
-          // Also re-enable siblings (all 4 buttons in this row were disabled)
-          var siblings = buttons[i].parentElement.querySelectorAll('.pay-btn');
-          for (var s = 0; s < siblings.length; s++) siblings[s].disabled = false;
-        }
+  $('btn-out').addEventListener('click', function () { signOut(); });
+
+  // ── Tabs ────────────────────────────────────────────────────────────────
+  Array.prototype.forEach.call(document.querySelectorAll('.tab[data-tab]'), function (t) {
+    t.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.tab[data-tab]'), function (x) { x.classList.remove('on'); });
+      t.classList.add('on');
+      ['run', 'quals', 'blast'].forEach(function (n) {
+        $('tab-' + n).classList.toggle('hide', n !== t.getAttribute('data-tab'));
+      });
+    });
+  });
+
+  // ── Load ────────────────────────────────────────────────────────────────
+  function load(eventId) {
+    return post({ action: 'sqa_data', event_id: eventId || D.eventId || 0 }).then(function (j) {
+      if (!guard(j)) return;
+      if (!j || !j.ok) { say('msg', 'bad', (j && j.error) || 'Could not load.'); return; }
+      D.events = j.events || [];
+      D.regs = j.registrations || [];
+      D.elig = j.eligibility || [];
+      D.qual = j.qualified || [];
+      D.eventId = j.event_id || 0;
+      if (!D.eventId && D.events.length) {
+        /* Default to the next qualifier that has not finished — the one the
+           operator is almost certainly standing at. */
+        var now = Date.now();
+        var upcoming = D.events.filter(function (e) {
+          return e.enabled && !e.is_test && new Date(e.last_board_at || e.starts_at).getTime() >= now;
+        }).sort(function (a, b) { return new Date(a.starts_at) - new Date(b.starts_at); });
+        var pick = upcoming[0] || D.events[0];
+        if (pick) return load(pick.id);
       }
+      paintEventSelect();
+      paintRegs();
+      paintEvents();
+      say('msg', '', '');
+    }).catch(function () { say('msg', 'bad', 'Could not reach the server.'); });
+  }
+
+  function paintEventSelect() {
+    var s = $('sel-ev');
+    s.innerHTML = '';
+    D.events.forEach(function (e) {
+      var o = document.createElement('option');
+      o.value = e.id;
+      o.textContent = (e.format === '9' ? '9 Ball' : '8 Ball') + ' · ' + fmtDT(e.starts_at) +
+        (e.enabled ? '' : '  (archived)') + (e.is_test ? '  (test)' : '');
+      if (e.id === D.eventId) o.selected = true;
+      s.appendChild(o);
+    });
+    var ev = currentEvent();
+    $('hdr-sub').textContent = ev ? (ev.title || 'Singles qualifiers') : 'Singles qualifiers';
+  }
+
+  function currentEvent() {
+    for (var i = 0; i < D.events.length; i++) if (D.events[i].id === D.eventId) return D.events[i];
+    return null;
+  }
+  function eligState(mn) {
+    for (var i = 0; i < D.elig.length; i++) if (D.elig[i].member_number === mn) return D.elig[i].state || '';
+    return '';
+  }
+  function isQualified(mn) {
+    for (var i = 0; i < D.qual.length; i++) if (D.qual[i].member_number === mn) return true;
+    return false;
+  }
+
+  function paintRegs() {
+    var host = $('regs');
+    var hideX = $('hide-cancelled').checked;
+    var list = D.regs.filter(function (r) { return !(hideX && r.status === 'cancelled'); });
+
+    var live = D.regs.filter(function (r) { return r.status === 'registered'; });
+    var inHouse = live.filter(function (r) { return r.checked_in; });
+    var paid = live.filter(function (r) { return r.paid; });
+    var owed = live.length - paid.length;
+
+    $('counts').innerHTML =
+      '<span class="count"><b>' + live.length + '</b> registered</span>' +
+      '<span class="count"><b>' + inHouse.length + '</b> checked in</span>' +
+      '<span class="count"><b>' + paid.length + '</b> paid</span>' +
+      '<span class="count"><b>' + owed + '</b> unpaid</span>';
+
+    if (!list.length) {
+      host.innerHTML = '<div class="spm-card state">Nobody registered for this qualifier yet.</div>';
+      return;
     }
 
-  </script>
+    host.innerHTML = list.map(function (r) {
+      var name = ((r.first_name || '') + ' ' + (r.last_name || '')).trim() || '(no name)';
+      var cancelled = r.status === 'cancelled';
+      var el = eligState(r.member_number);
+      var q = isQualified(r.member_number);
+      return '<div class="reg' + (cancelled ? ' cancelled' : (r.checked_in ? ' inhouse' : '')) + '">' +
+        '<div class="reg-top">' +
+          '<div style="min-width:0">' +
+            '<div class="reg-name">' + esc(name) + '</div>' +
+            '<div class="reg-sub">' + esc(r.member_number) + (r.email ? ' · ' + esc(r.email) : '') + '</div>' +
+            '<div class="reg-tags">' +
+              (cancelled ? '<span class="pill p-bad">cancelled</span>' : '') +
+              (r.checked_in ? '<span class="pill p-ok">checked in</span>' : '') +
+              (r.paid ? '<span class="pill p-ok">paid ' + esc(r.paid_amount != null ? money(r.paid_amount) : '') +
+                        (r.payment_method ? ' · ' + esc(r.payment_method) : '') + '</span>'
+                      : '<span class="pill p-warn">unpaid</span>') +
+              (el === 'ok' ? '<span class="pill p-info">eligible</span>' : (el ? '<span class="pill p-mute">' + esc(el) + '</span>' : '')) +
+              (q ? '<span class="pill p-ok">qualified</span>' : '') +
+              (r.source === 'admin' ? '<span class="pill p-mute">added by you</span>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        (cancelled
+          ? '<div class="reg-acts"><button class="spm-btn spm-btn-secondary spm-btn-sm" data-act="restore" data-id="' + r.id + '">Restore</button></div>'
+          : '<div class="reg-acts">' +
+              '<button class="spm-btn ' + (r.checked_in ? 'spm-btn-secondary' : 'spm-btn-primary') + ' spm-btn-sm" data-act="checkin" data-id="' + r.id + '">' +
+                (r.checked_in ? 'Undo check-in' : 'Check in') + '</button>' +
+              '<button class="spm-btn spm-btn-secondary spm-btn-sm" data-act="pay" data-id="' + r.id + '">' +
+                (r.paid ? 'Payment' : 'Mark paid') + '</button>' +
+              '<button class="spm-btn spm-btn-secondary spm-btn-sm" data-act="elig" data-id="' + r.id + '">' +
+                (el === 'ok' ? 'Un-tick eligible' : 'Tick eligible') + '</button>' +
+              '<button class="spm-btn spm-btn-secondary spm-btn-sm" data-act="qual" data-id="' + r.id + '">' +
+                (q ? 'Un-qualify' : 'Mark qualified') + '</button>' +
+              '<button class="spm-btn spm-btn-danger spm-btn-sm" data-act="cancel" data-id="' + r.id + '">Remove</button>' +
+            '</div>') +
+      '</div>';
+    }).join('');
+
+    Array.prototype.forEach.call(host.querySelectorAll('[data-act]'), function (b) {
+      b.addEventListener('click', function () { act(b.getAttribute('data-act'), +b.getAttribute('data-id'), b); });
+    });
+  }
+
+  function regById(id) { for (var i = 0; i < D.regs.length; i++) if (D.regs[i].id === id) return D.regs[i]; return null; }
+
+  function act(what, id, btn) {
+    var r = regById(id);
+    if (!r) return;
+    var ev = currentEvent();
+
+    if (what === 'pay') { openPay(r); return; }
+
+    var call = null, confirmText = null;
+    if (what === 'checkin') {
+      call = { action: 'sqa_reg_set', id: id, field: 'checked_in', value: !r.checked_in };
+    } else if (what === 'cancel') {
+      confirmText = 'Remove ' + ((r.first_name || '') + ' ' + (r.last_name || '')).trim() + ' from this qualifier?';
+      call = { action: 'sqa_reg_set', id: id, field: 'status', value: 'cancelled' };
+    } else if (what === 'restore') {
+      call = { action: 'sqa_reg_set', id: id, field: 'status', value: 'registered' };
+    } else if (what === 'elig') {
+      call = { action: 'sqa_eligible', member_number: r.member_number,
+               format: ev && ev.format, regionals_season: (ev && ev.regionals_season) || '',
+               state: eligState(r.member_number) === 'ok' ? '' : 'ok' };
+    } else if (what === 'qual') {
+      var on = !isQualified(r.member_number);
+      confirmText = on
+        ? 'Mark ' + (r.first_name || 'them') + ' as qualified? This emails them.'
+        : 'Un-mark ' + (r.first_name || 'them') + ' as qualified?';
+      call = { action: 'sqa_qualify', id: id, qualified: on };
+    }
+    if (!call) return;
+    if (confirmText && !confirm(confirmText)) return;
+
+    btn.disabled = true;
+    post(call).then(function (j) {
+      btn.disabled = false;
+      if (!guard(j)) return;
+      if (!j || !j.ok) { say('msg', 'bad', (j && j.error) || 'That did not save.'); return; }
+      if (j.email === 'sent') say('msg', 'ok', 'Saved, and they were emailed.');
+      else if (j.email === 'blocked') say('msg', 'info', 'Saved. No email — that address is on the no-contact list.');
+      else if (j.email === 'failed') say('msg', 'bad', 'Saved, but the email FAILED to send.');
+      else say('msg', 'ok', 'Saved.');
+      load();
+    }).catch(function () { btn.disabled = false; say('msg', 'bad', 'Could not reach the server.'); });
+  }
+
+  // ── Payment dialog ──────────────────────────────────────────────────────
+  function openPay(r) {
+    payId = r.id;
+    $('pay-who').textContent = ((r.first_name || '') + ' ' + (r.last_name || '')).trim() + ' · ' + r.member_number;
+    $('p-amt').value = r.paid_amount != null ? r.paid_amount : (currentEvent() ? currentEvent().entry_fee : '');
+    $('p-method').value = r.payment_method || '';
+    $('p-email').checked = !r.paid;
+    say('pay-msg', '', '');
+    $('p-go').textContent = r.paid ? 'Update' : 'Mark paid';
+    $('dlg-pay').classList.add('active');
+  }
+  $('p-go').addEventListener('click', function () {
+    var b = $('p-go'); b.disabled = true;
+    post({ action: 'sqa_paid', id: payId, paid: true, amount: $('p-amt').value,
+           method: $('p-method').value, no_email: !$('p-email').checked })
+      .then(function (j) {
+        b.disabled = false;
+        if (!guard(j)) return;
+        if (!j || !j.ok) { say('pay-msg', 'bad', (j && j.error) || 'Could not save.'); return; }
+        $('dlg-pay').classList.remove('active');
+        say('msg', j.email === 'failed' ? 'bad' : 'ok',
+            j.email === 'sent' ? 'Payment recorded and receipt emailed.'
+          : j.email === 'failed' ? 'Payment recorded, but the receipt FAILED to send.'
+          : 'Payment recorded.');
+        load();
+      }).catch(function () { b.disabled = false; say('pay-msg', 'bad', 'Could not reach the server.'); });
+  });
+  $('p-clear').addEventListener('click', function () {
+    if (!confirm('Clear the payment on this registration?')) return;
+    post({ action: 'sqa_paid', id: payId, paid: false }).then(function (j) {
+      if (!guard(j)) return;
+      $('dlg-pay').classList.remove('active');
+      say('msg', (j && j.ok) ? 'ok' : 'bad', (j && j.ok) ? 'Payment cleared.' : ((j && j.error) || 'Could not clear.'));
+      load();
+    });
+  });
+
+  // ── Add registration ────────────────────────────────────────────────────
+  $('btn-add').addEventListener('click', function () {
+    ['a-fn', 'a-ln', 'a-mn', 'a-em'].forEach(function (i) { $(i).value = ''; });
+    say('add-msg', '', '');
+    $('dlg-add').classList.add('active');
+  });
+  $('a-mn').addEventListener('input', function () {
+    $('a-mn').value = $('a-mn').value.replace(/[^0-9]/g, '').slice(0, 8);
+  });
+  $('a-go').addEventListener('click', function () {
+    var mn = $('a-mn').value.replace(/[^0-9]/g, '');
+    if (mn.length !== 8) { say('add-msg', 'bad', 'An APA number is exactly 8 digits.'); return; }
+    var b = $('a-go'); b.disabled = true;
+    post({ action: 'sqa_reg_add', event_id: D.eventId, member_number: mn,
+           first_name: $('a-fn').value, last_name: $('a-ln').value, email: $('a-em').value })
+      .then(function (j) {
+        b.disabled = false;
+        if (!guard(j)) return;
+        if (!j || !j.ok) { say('add-msg', 'bad', (j && j.error) || 'Could not add them.'); return; }
+        $('dlg-add').classList.remove('active');
+        say('msg', 'ok', 'Added. They were not emailed — you added them by hand.');
+        load();
+      }).catch(function () { b.disabled = false; say('add-msg', 'bad', 'Could not reach the server.'); });
+  });
+
+  // ── Qualifier editor ────────────────────────────────────────────────────
+  function paintEvents() {
+    $('evs').innerHTML = D.events.map(function (e) {
+      return '<div class="ev' + (e.enabled ? '' : ' off') + '">' +
+        '<div style="min-width:0">' +
+          '<div style="font-weight:800">' + esc(e.title || '(untitled)') + '</div>' +
+          '<div style="color:var(--muted);font-size:.85rem">' + esc(fmtDT(e.starts_at)) +
+            (e.venue_name ? ' · ' + esc(e.venue_name) : '') + '</div>' +
+          '<div class="reg-tags" style="margin-top:6px">' +
+            '<span class="pill ' + (e.enabled ? 'p-ok' : 'p-mute') + '">' + (e.enabled ? 'open' : 'archived') + '</span>' +
+            (e.is_test ? '<span class="pill p-warn">test</span>' : '') +
+            '<span class="pill p-info">' + (e.format === '9' ? '9 Ball' : '8 Ball') + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:7px;flex-wrap:wrap">' +
+          '<button class="spm-btn spm-btn-secondary spm-btn-sm" data-ev="' + e.id + '">Edit</button>' +
+          '<button class="spm-btn ' + (e.enabled ? 'spm-btn-danger' : 'spm-btn-secondary') + ' spm-btn-sm" data-arch="' + e.id + '">' +
+            (e.enabled ? 'Archive' : 'Reopen') + '</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    Array.prototype.forEach.call($('evs').querySelectorAll('[data-ev]'), function (b) {
+      b.addEventListener('click', function () { openEv(+b.getAttribute('data-ev')); });
+    });
+    Array.prototype.forEach.call($('evs').querySelectorAll('[data-arch]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = +b.getAttribute('data-arch');
+        var e = D.events.filter(function (x) { return x.id === id; })[0];
+        if (!e) return;
+        if (!confirm(e.enabled ? 'Archive this qualifier? It disappears from the player page and registration closes.'
+                               : 'Reopen this qualifier for registration?')) return;
+        var row = {};
+        for (var k in e) row[k] = e[k];
+        row.enabled = !e.enabled;
+        post({ action: 'sqa_event_save', event: row }).then(function (j) {
+          if (!guard(j)) return;
+          say('msg', (j && j.ok) ? 'ok' : 'bad', (j && j.ok) ? 'Saved.' : ((j && j.error) || 'Could not save.'));
+          load();
+        });
+      });
+    });
+  }
+
+  function openEv(id) {
+    evEditId = id || 0;
+    var e = id ? D.events.filter(function (x) { return x.id === id; })[0] : null;
+    $('ev-title').textContent = e ? 'Edit qualifier' : 'New qualifier';
+    $('e-title').value = e ? (e.title || '') : '';
+    $('e-format').value = e ? (e.format === '9' ? '9' : '8') : '8';
+    $('e-season').value = e ? (e.regionals_season || '') : '';
+    $('e-start').value = e ? isoToLocalInput(e.starts_at) : '';
+    $('e-last').value = e ? isoToLocalInput(e.last_board_at) : '';
+    $('e-venue').value = e ? (e.venue_name || '') : '';
+    $('e-addr').value = e ? (e.venue_address || '') : '';
+    $('e-entry').value = e ? (e.entry_fee != null ? e.entry_fee : '') : '50';
+    $('e-greens').value = e ? (e.greens_fee != null ? e.greens_fee : '') : '3';
+    $('e-enabled').checked = e ? !!e.enabled : true;
+    say('ev-msg', '', '');
+    $('dlg-ev').classList.add('active');
+  }
+  $('btn-new').addEventListener('click', function () { openEv(0); });
+
+  $('e-go').addEventListener('click', function () {
+    var b = $('e-go'); b.disabled = true;
+    var row = {
+      id: evEditId || undefined,
+      title: $('e-title').value, format: $('e-format').value,
+      regionals_season: $('e-season').value,
+      starts_at: localInputToIso($('e-start').value),
+      last_board_at: localInputToIso($('e-last').value),
+      venue_name: $('e-venue').value, venue_address: $('e-addr').value,
+      entry_fee: $('e-entry').value || 0, greens_fee: $('e-greens').value || 0,
+      enabled: $('e-enabled').checked
+    };
+    post({ action: 'sqa_event_save', event: row }).then(function (j) {
+      b.disabled = false;
+      if (!guard(j)) return;
+      if (!j || !j.ok) { say('ev-msg', 'bad', (j && j.error) || 'Could not save.'); return; }
+      $('dlg-ev').classList.remove('active');
+      say('msg', 'ok', 'Qualifier saved.');
+      load();
+    }).catch(function () { b.disabled = false; say('ev-msg', 'bad', 'Could not reach the server.'); });
+  });
+
+  // ── Blast ───────────────────────────────────────────────────────────────
+  $('btn-blast').addEventListener('click', function () {
+    var ev = currentEvent();
+    var n = D.regs.filter(function (r) { return r.status === 'registered' && r.email; }).length;
+    if (!n) { say('msg', 'bad', 'Nobody registered for this qualifier has an email address.'); return; }
+    if (!confirm('Send to ' + n + ' registrant' + (n === 1 ? '' : 's') + ' of "' + ((ev && ev.title) || '') + '"?')) return;
+    var b = $('btn-blast'); b.disabled = true; b.textContent = 'Sending…';
+    post({ action: 'sqa_email_all', event_id: D.eventId, subject: $('bl-sub').value, message: $('bl-msg').value })
+      .then(function (j) {
+        b.disabled = false; b.textContent = 'Send to registrants';
+        if (!guard(j)) return;
+        if (j && j.ok) { say('msg', 'ok', 'Sent to ' + j.sent + ' recipient' + (j.sent === 1 ? '' : 's') + '.');
+                         $('bl-sub').value = ''; $('bl-msg').value = ''; }
+        else say('msg', 'bad', (j && j.error) || 'Could not send.');
+      }).catch(function () { b.disabled = false; b.textContent = 'Send to registrants'; say('msg', 'bad', 'Could not reach the server.'); });
+  });
+
+  // ── CSV ─────────────────────────────────────────────────────────────────
+  $('btn-csv').addEventListener('click', function () {
+    var ev = currentEvent();
+    var head = ['APA number', 'First', 'Last', 'Email', 'Status', 'Checked in', 'Paid', 'Amount', 'Method', 'Eligible', 'Qualified'];
+    var rows = D.regs.map(function (r) {
+      return [r.member_number, r.first_name, r.last_name, r.email, r.status,
+              r.checked_in ? 'yes' : '', r.paid ? 'yes' : '', r.paid_amount != null ? r.paid_amount : '',
+              r.payment_method || '', eligState(r.member_number), isQualified(r.member_number) ? 'yes' : ''];
+    });
+    var csv = [head].concat(rows).map(function (line) {
+      return line.map(function (c) { return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'qualifier-' + (ev ? ev.id : 'list') + '.csv';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  });
+
+  // ── Wiring ──────────────────────────────────────────────────────────────
+  $('sel-ev').addEventListener('change', function () { load(+$('sel-ev').value); });
+  $('btn-refresh').addEventListener('click', function () { load(); });
+  $('hide-cancelled').addEventListener('change', paintRegs);
+  Array.prototype.forEach.call(document.querySelectorAll('[data-close]'), function (b) {
+    b.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.spm-modal'), function (m) { m.classList.remove('active'); });
+    });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') Array.prototype.forEach.call(document.querySelectorAll('.spm-modal'), function (m) { m.classList.remove('active'); });
+  });
+
+  // ── Boot ────────────────────────────────────────────────────────────────
+  var qs = new URLSearchParams(location.search);
+
+  /* The curtain. Obscurity only — every action is checked server-side. */
+  if (qs.get('admin') !== '1') return;
+  $('curtain').classList.add('hide');
+  $('app').classList.remove('hide');
+
+  try { token = sessionStorage.getItem(SKEY) || null; } catch (e) {}
+
+  var linkKey = qs.get('k');
+  if (linkKey) {
+    /* Strip the link token from the URL before anything else, so it does not
+       sit in the address bar, the history, or a screenshot. */
+    history.replaceState({}, '', location.pathname + '?admin=1');
+    showSignin('Signing you in…');
+    post({ action: 'sqa_verify', k: linkKey }).then(function (j) {
+      if (j && j.ok && j.admin) {
+        token = j.admin;
+        try { sessionStorage.setItem(SKEY, token); } catch (e) {}
+        showConsole();
+        load();
+      } else {
+        showSignin((j && j.error) || 'That sign-in link did not work.');
+      }
+    }).catch(function () { showSignin('Could not reach the server.'); });
+  } else if (token) {
+    showConsole();
+    load();
+  } else {
+    showSignin();
+  }
+})();
+</script>
 </body>
 </html>
