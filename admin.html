@@ -473,16 +473,6 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
       D.elig = j.eligibility || [];
       D.qual = j.qualified || [];
       D.eventId = j.event_id || 0;
-      if (!D.eventId && D.events.length) {
-        /* Default to the next qualifier that has not finished — the one the
-           operator is almost certainly standing at. */
-        var now = Date.now();
-        var upcoming = D.events.filter(function (e) {
-          return e.enabled && !e.is_test && new Date(e.last_board_at || e.starts_at).getTime() >= now;
-        }).sort(function (a, b) { return new Date(a.starts_at) - new Date(b.starts_at); });
-        var pick = upcoming[0] || D.events[0];
-        if (pick) return load(pick.id);
-      }
       paintEventSelect();
       paintRegs();
       paintEvents();
@@ -493,6 +483,11 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
   function paintEventSelect() {
     var s = $('sel-ev');
     s.innerHTML = '';
+    var all = document.createElement('option');
+    all.value = '0';
+    all.textContent = 'All qualifiers (' + D.events.length + ')';
+    if (!D.eventId) all.selected = true;
+    s.appendChild(all);
     D.events.forEach(function (e) {
       var o = document.createElement('option');
       o.value = e.id;
@@ -502,19 +497,33 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
       s.appendChild(o);
     });
     var ev = currentEvent();
-    $('hdr-sub').textContent = ev ? (ev.title || 'Singles qualifiers') : 'Singles qualifiers';
+    $('hdr-sub').textContent = D.eventId ? (ev ? (ev.title || 'Singles qualifiers') : 'Singles qualifiers')
+                                         : 'All qualifiers';
   }
 
   function currentEvent() {
     for (var i = 0; i < D.events.length; i++) if (D.events[i].id === D.eventId) return D.events[i];
     return null;
   }
-  function eligState(mn) {
-    for (var i = 0; i < D.elig.length; i++) if (D.elig[i].member_number === mn) return D.elig[i].state || '';
+  function eventById(id) {
+    for (var i = 0; i < D.events.length; i++) if (D.events[i].id === id) return D.events[i];
+    return null;
+  }
+  /* Keyed on (member, format, season) from the registration's OWN event, not on
+     member alone. Member-only matching was correct while the list showed a
+     single qualifier and silently wrong the moment ALL spans two formats. */
+  function matches(row, r) {
+    var ev = eventById(r.event_id);
+    if (!ev) return false;
+    return row.member_number === r.member_number && row.format === ev.format &&
+           (row.regionals_season || '') === (ev.regionals_season || '');
+  }
+  function eligState(r) {
+    for (var i = 0; i < D.elig.length; i++) if (matches(D.elig[i], r)) return D.elig[i].state || '';
     return '';
   }
-  function isQualified(mn) {
-    for (var i = 0; i < D.qual.length; i++) if (D.qual[i].member_number === mn) return true;
+  function isQualified(r) {
+    for (var i = 0; i < D.qual.length; i++) if (matches(D.qual[i], r)) return true;
     return false;
   }
 
@@ -542,13 +551,16 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
     host.innerHTML = list.map(function (r) {
       var name = ((r.first_name || '') + ' ' + (r.last_name || '')).trim() || '(no name)';
       var cancelled = r.status === 'cancelled';
-      var el = eligState(r.member_number);
-      var q = isQualified(r.member_number);
+      var el = eligState(r);
+      var q = isQualified(r);
+      var rev = eventById(r.event_id);
       return '<div class="reg' + (cancelled ? ' cancelled' : (r.checked_in ? ' inhouse' : '')) + '">' +
         '<div class="reg-top">' +
           '<div style="min-width:0">' +
             '<div class="reg-name">' + esc(name) + '</div>' +
             '<div class="reg-sub">' + esc(r.member_number) + (r.email ? ' · ' + esc(r.email) : '') + '</div>' +
+            (!D.eventId && rev ? '<div class="reg-sub" style="font-weight:700;color:var(--spm-accent)">' +
+              esc((rev.format === '9' ? '9 Ball' : '8 Ball') + ' · ' + fmtDT(rev.starts_at)) + '</div>' : '') +
             '<div class="reg-tags">' +
               (cancelled ? '<span class="pill p-bad">cancelled</span>' : '') +
               (r.checked_in ? '<span class="pill p-ok">checked in</span>' : '') +
@@ -589,7 +601,10 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
   function act(what, id, btn) {
     var r = regById(id);
     if (!r) return;
-    var ev = currentEvent();
+    /* The row's own event, never the dropdown's: in the ALL view there is no
+       single current event, and using one would tick eligibility against the
+       wrong format. */
+    var ev = eventById(r.event_id);
 
     if (what === 'pay') { openPay(r); return; }
 
@@ -605,13 +620,13 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
       /* eligibility_state_check allows ONLY 'eligible' / 'ineligible', and the
          column is NOT NULL — "undecided" is the absence of a row. So the button
          cycles unset → eligible → ineligible → unset. */
-      var now = eligState(r.member_number);
+      var now = eligState(r);
       var next = now === 'eligible' ? 'ineligible' : now === 'ineligible' ? '' : 'eligible';
       call = { action: 'sqa_eligible', member_number: r.member_number,
                format: ev && ev.format, regionals_season: (ev && ev.regionals_season) || '',
                state: next };
     } else if (what === 'qual') {
-      var on = !isQualified(r.member_number);
+      var on = !isQualified(r);
       confirmText = on
         ? 'Mark ' + (r.first_name || 'them') + ' as qualified? This emails them.'
         : 'Un-mark ' + (r.first_name || 'them') + ' as qualified?';
@@ -672,6 +687,7 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
 
   // ── Add registration ────────────────────────────────────────────────────
   $('btn-add').addEventListener('click', function () {
+    if (!D.eventId) { say('msg', 'bad', 'Pick a single qualifier first, so there is one to add them to.'); return; }
     ['a-fn', 'a-ln', 'a-mn', 'a-em'].forEach(function (i) { $(i).value = ''; });
     say('add-msg', '', '');
     $('dlg-add').classList.add('active');
@@ -782,6 +798,7 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
 
   // ── Blast ───────────────────────────────────────────────────────────────
   $('btn-blast').addEventListener('click', function () {
+    if (!D.eventId) { say('msg', 'bad', 'Pick a single qualifier on the first tab. A blast goes to one qualifier\u2019s registrants.'); return; }
     var ev = currentEvent();
     var n = D.regs.filter(function (r) { return r.status === 'registered' && r.email; }).length;
     if (!n) { say('msg', 'bad', 'Nobody registered for this qualifier has an email address.'); return; }
@@ -800,18 +817,20 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
   // ── CSV ─────────────────────────────────────────────────────────────────
   $('btn-csv').addEventListener('click', function () {
     var ev = currentEvent();
-    var head = ['APA number', 'First', 'Last', 'Email', 'Status', 'Checked in', 'Paid', 'Amount', 'Method', 'Eligible', 'Qualified'];
+    var head = ['Qualifier', 'Date', 'APA number', 'First', 'Last', 'Email', 'Status', 'Checked in', 'Paid', 'Amount', 'Method', 'Eligible', 'Qualified'];
     var rows = D.regs.map(function (r) {
-      return [r.member_number, r.first_name, r.last_name, r.email, r.status,
+      var e = eventById(r.event_id);
+      return [e ? (e.format === '9' ? '9 Ball' : '8 Ball') : '', e ? fmtDT(e.starts_at) : '',
+              r.member_number, r.first_name, r.last_name, r.email, r.status,
               r.checked_in ? 'yes' : '', r.paid ? 'yes' : '', r.paid_amount != null ? r.paid_amount : '',
-              r.payment_method || '', eligState(r.member_number), isQualified(r.member_number) ? 'yes' : ''];
+              r.payment_method || '', eligState(r), isQualified(r) ? 'yes' : ''];
     });
     var csv = [head].concat(rows).map(function (line) {
       return line.map(function (c) { return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(',');
     }).join('\r\n');
     var a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = 'qualifier-' + (ev ? ev.id : 'list') + '.csv';
+    a.download = 'qualifiers-' + (D.eventId && ev ? ev.id : 'all') + '.csv';
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
   });
