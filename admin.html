@@ -86,6 +86,14 @@ html,body{margin:0;padding:0;width:100%;background:var(--bg);color:var(--text);
 .spm-btn-secondary{background:#fff;color:var(--text);border:2px solid var(--border)}
 .spm-btn-danger{background:#fff;color:var(--spm-primary);border:2px solid var(--spm-primary)}
 .spm-btn-sm{padding:7px 14px;min-height:38px;font-size:.82rem}
+/* On a phone the small buttons ARE the job — check in, mark paid — and 38px is
+   under the 44px tap target. Give them the full size where it matters and keep
+   the compact look on desktop, where there is a mouse. */
+@media(max-width:767px){
+  .spm-btn-sm{min-height:44px;padding:10px 16px;font-size:.85rem}
+  .reg-acts{gap:8px}
+  .reg-acts .spm-btn{flex:1 1 calc(50% - 4px)}
+}
 
 label.fl{display:block;font-weight:700;font-size:.85rem;margin:0 0 4px}
 input.fi,select.fi,textarea.fi{width:100%;padding:10px 12px;font-size:1rem;font-family:inherit;
