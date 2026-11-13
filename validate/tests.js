@@ -37,13 +37,19 @@ window.SQ_SUITE = (function () {
 
   /* Fixtures seeded by tools/claude/multipass/seed-validate-fixtures.mjs.
      PAST and CLOSED are is_test=false on purpose: sqEvent_ filters is_test
-     first, so an is_test row can never reach the 'over' or disabled branches. */
-  var FIX = {
-    past: 557,        // real-flagged, already finished  -> expects code 'over'
-    closed: 558,      // real-flagged, enabled=false     -> expects code 'event'
-    testFixture: 21,  // is_test=true                    -> expects code 'event'
-    unknown: 99999999
-  };
+     first, so an is_test row can never reach the 'over' or disabled branches.
+
+     IDS ARE NOT HARDCODED. They are serial, so a purge-and-reseed changes them
+     — and a stale hardcoded id does not make these checks fail, it makes them
+     pass VACUOUSLY, which is worse. They are read from fixtures.json, written
+     by the seeder, and then PROBED: if the server does not actually have them,
+     every dependent check below skips loudly instead of pretending. */
+  var FIX = { past: 0, closed: 0, isTest: 0, unknown: 99999999, ready: false };
+
+  var SEED_HINT = 'Seed them with:  node tools/claude/multipass/seed-validate-fixtures.mjs --go';
+  function needFixtures() {
+    return { skip: 'The validation fixtures are not seeded, so this check cannot run. ' + SEED_HINT };
+  }
 
   var TZ = 'America/Los_Angeles';
 
@@ -145,6 +151,34 @@ window.SQ_SUITE = (function () {
             if (e) ctx.liveEventId = e.id;
             return { ok: !!e, detail: e ? 'using event ' + e.id + ' — ' + e.title : 'no open qualifier to test against' };
           }
+        },
+        {
+          id: '0.4', name: 'Validation fixtures are present',
+          why: 'Five checks below need purpose-built events the players never see. Their ids are serial, so this reads them from fixtures.json and then PROVES the server has them — a stale id would otherwise make those checks pass without testing anything.',
+          run: function (ctx) {
+            return fetch('fixtures.json?t=' + Date.now(), { cache: 'no-store' })
+              .then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (j) {
+                if (!j || !j.past) {
+                  return { skip: 'fixtures.json is not published, so the fixture ids are unknown. ' + SEED_HINT };
+                }
+                FIX.past = j.past; FIX.closed = j.closed || 0; FIX.isTest = j.isTest || 0;
+                /* The probe: a seeded PAST fixture answers 'over' (it exists but
+                   has finished). A deleted one answers 'event'. That one reply
+                   tells present from absent. */
+                return post({ action: 'sq_register', event_id: FIX.past, member_number: ctx.member,
+                              first_name: 'Fixture', last_name: 'Probe',
+                              email: 'fixture-probe@example.com', dry_run: 1 })
+                  .then(function (r) {
+                    FIX.ready = !!(r && r.code === 'over');
+                    return FIX.ready
+                      ? { ok: true, detail: 'seeded — past=' + FIX.past + ', closed=' + FIX.closed + ', is_test=' + FIX.isTest }
+                      : { skip: 'fixtures.json names event ' + FIX.past + ' but the server answered ' +
+                                JSON.stringify(r && r.code) + ' — the fixtures have been removed. ' + SEED_HINT };
+                  });
+              })
+              .catch(function () { return { skip: 'could not read fixtures.json. ' + SEED_HINT }; });
+          }
         }
       ]
     },
@@ -173,16 +207,22 @@ window.SQ_SUITE = (function () {
           id: '1.2', name: 'The finished fixture is NOT listed',
           why: 'Canary for the sqOver_ filter. Fixture 557 finished in January; if it appears, past qualifiers are being shown to players.',
           run: function (ctx) {
+            if (!FIX.ready) return needFixtures();   /* with no fixture this would pass without testing anything */
             var hit = (ctx.events || []).filter(function (e) { return e.id === FIX.past; });
-            return { ok: !hit.length, detail: hit.length ? 'LEAKED — finished fixture 557 is on the public list' : 'fixture 557 correctly hidden' };
+            return { ok: !hit.length,
+                     detail: hit.length ? 'LEAKED — finished fixture ' + FIX.past + ' is on the public list'
+                                        : 'fixture ' + FIX.past + ' exists and is correctly hidden' };
           }
         },
         {
           id: '1.3', name: 'The disabled fixture is NOT listed',
           why: 'Canary for the enabled=true filter. Archiving a qualifier must remove it from the page.',
           run: function (ctx) {
+            if (!FIX.ready || !FIX.closed) return needFixtures();
             var hit = (ctx.events || []).filter(function (e) { return e.id === FIX.closed; });
-            return { ok: !hit.length, detail: hit.length ? 'LEAKED — disabled fixture 558 is on the public list' : 'fixture 558 correctly hidden' };
+            return { ok: !hit.length,
+                     detail: hit.length ? 'LEAKED — disabled fixture ' + FIX.closed + ' is on the public list'
+                                        : 'fixture ' + FIX.closed + ' exists and is correctly hidden' };
           }
         },
         {
@@ -287,17 +327,26 @@ window.SQ_SUITE = (function () {
         {
           id: '2.9', name: 'A test-fixture event cannot be registered for',
           why: 'is_test rows must be unreachable from the public path, not merely hidden from the list.',
-          run: function (ctx) { return post(baseReg(ctx, { event_id: FIX.testFixture })).then(function (j) { return rejectedWith(j, 'event'); }); }
+          run: function (ctx) {
+            if (!FIX.ready || !FIX.isTest) return needFixtures();
+            return post(baseReg(ctx, { event_id: FIX.isTest })).then(function (j) { return rejectedWith(j, 'event'); });
+          }
         },
         {
           id: '2.10', name: 'An archived (disabled) qualifier cannot be registered for',
           why: 'Archiving must close registration, not just hide the card. Someone holding the old link must be refused.',
-          run: function (ctx) { return post(baseReg(ctx, { event_id: FIX.closed })).then(function (j) { return rejectedWith(j, 'event'); }); }
+          run: function (ctx) {
+            if (!FIX.ready || !FIX.closed) return needFixtures();
+            return post(baseReg(ctx, { event_id: FIX.closed })).then(function (j) { return rejectedWith(j, 'event'); });
+          }
         },
         {
           id: '2.11', name: 'A finished qualifier cannot be registered for',
           why: 'The cutoff is enforced SERVER-side. A decorative deadline shipped in this project before; this is the branch that proves it is not decorative here.',
-          run: function (ctx) { return post(baseReg(ctx, { event_id: FIX.past })).then(function (j) { return rejectedWith(j, 'over'); }); }
+          run: function (ctx) {
+            if (!FIX.ready) return needFixtures();
+            return post(baseReg(ctx, { event_id: FIX.past })).then(function (j) { return rejectedWith(j, 'over'); });
+          }
         }
       ]
     },
