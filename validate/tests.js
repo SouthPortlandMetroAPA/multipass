@@ -564,24 +564,30 @@ window.SQ_SUITE = (function () {
           }
         },
         {
-          id: '5.5', name: 'The per-member limiter engages',
-          why: 'Open registration mails an address a stranger typed. Slow, and it burns that synthetic member’s hourly window on purpose.',
+          id: '5.5', name: 'Repeat submits are accepted and send no extra email',
+          why: 'There is no rate limiter here by operator decision (2026-11-12, "dont limit member either"). What stops a double-tap becoming two emails is the already-registered branch returning before the send. If that short-circuit ever breaks, every repeat tap mails the player again.',
           slow: true,
           run: function (ctx) {
             var m = freshMember();
             var body = baseReg(ctx, { member_number: m });
             var seen = [];
             var chain = Promise.resolve();
-            for (var i = 0; i < 8; i++) {
+            for (var i = 0; i < 5; i++) {
               chain = chain.then(function () {
-                return post(body).then(function (j) { seen.push(j && (j.code || (j.ok ? 'ok' : '?'))); if (j && j.token) ctx.cleanup.push(j.token); });
+                return post(body).then(function (j) {
+                  seen.push({ ok: j && j.ok, already: !!(j && j.already), email: j && j.email });
+                  if (j && j.token) ctx.cleanup.push(j.token);
+                });
               });
             }
             return chain.then(function () {
-              var limited = seen.indexOf('rate') >= 0;
-              return { ok: limited,
-                       detail: 'responses in order: ' + seen.join(', ') +
-                               (limited ? '' : ' — NEVER rate-limited in 8 attempts') };
+              var first = seen[0], rest = seen.slice(1);
+              var noLimit = seen.every(function (r) { return r.ok; });
+              var repeatsSilent = rest.every(function (r) { return r.already && r.email === 'skipped'; });
+              return { ok: !!(first && first.ok && noLimit && repeatsSilent),
+                       detail: '5 submits: ' + JSON.stringify(seen) +
+                               (noLimit ? '' : ' - something refused one, but there is no limiter any more') +
+                               (repeatsSilent ? '' : ' - A REPEAT SENT EMAIL; the short-circuit is broken') };
             });
           }
         },
