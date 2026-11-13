@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Singles Qualifiers — South Portland Metro APA</title>
+<title>Singles Qualifiers · South Portland Metro APA</title>
 <link rel="icon" href="favicon.svg">
 <meta name="description" content="Register for South Portland Metro APA Play Til You Win singles qualifiers.">
-<meta property="og:title" content="Singles Qualifiers — South Portland Metro APA">
+<meta property="og:title" content="Singles Qualifiers · South Portland Metro APA">
 <meta property="og:description" content="Register for a Play Til You Win singles qualifier.">
 <meta property="og:image" content="https://southportlandmetroapa.github.io/multipass/og-image.png">
 <!--
@@ -438,9 +438,11 @@ goBtn.addEventListener('click', function () {
   if (mn.length !== MN_DIGITS) {
     fMn.classList.add('bad');
     fMn.focus();
+    /* No em-dash in anything a player reads (house convention). This string is
+       the one shown on the exact failure that reached a real player today. */
     errEl.textContent = mn.length
       ? 'That is ' + mn.length + ' digit' + (mn.length === 1 ? '' : 's') +
-        ' — an APA member number is ' + MN_DIGITS + '.'
+        '. An APA member number is ' + MN_DIGITS + ' digits.'
       : 'Please enter your ' + MN_DIGITS + '-digit APA member number.';
     return;
   }
