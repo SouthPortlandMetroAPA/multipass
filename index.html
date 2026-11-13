@@ -552,6 +552,52 @@ cancelFromLink().then(function () {
     '<div class="spm-card state">Could not load the qualifier list. Please refresh.</div>';
 });
 
+/* ── Live data refresh (apa_core.app_pulse) ────────────────────────────────
+   House rule: an open page whose data changes must poll and re-render, with
+   version updates kept separate. The operator adds, edits or archives a
+   qualifier from the admin page; without this, a phone left open all morning
+   keeps showing the old list.
+
+   The key is the literal 'index' — this page has no session and asks the
+   server who nobody is, so the pulse is one hash over the PUBLIC qualifier
+   list. That is exactly the scope a player is allowed to see.
+
+   Skips while the tab is hidden or the register dialog is open: yanking the
+   list out from under a half-filled form is worse than a stale card. The
+   first sample only seeds. */
+var SB_URL = 'https://dqzbekoaysgaiqljueac.supabase.co';
+var ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxemJla29heXNnYWlxbGp1ZWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNzA5NzgsImV4cCI6MjA5MDc0Njk3OH0.cCdGxZ4zEFzU_r6lWSDeoNWG67Q4MSYCAtpds035dfU';
+var PULSE_KEY = 'index';
+
+var _dataPulse = null;
+function fetchDataPulse() {
+  return fetch(SB_URL + '/rest/v1/rpc/app_pulse', {
+    method: 'POST',
+    headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json',
+               'Accept-Profile': 'apa_core', 'Content-Profile': 'apa_core' },
+    body: JSON.stringify({ p_app: 'multipass', p_key: String(PULSE_KEY) })
+  }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+}
+function pollDataPulse() {
+  if (document.hidden) return;
+  if (dlg.classList.contains('active')) return;
+  return fetchDataPulse().then(function (p) {
+    if (p === null) return;
+    if (_dataPulse === null) { _dataPulse = p; return; }
+    if (p !== _dataPulse) {
+      _dataPulse = p;
+      /* The list moved. Re-read it, then re-check what this device remembers. */
+      post({ action: 'sq_events' }).then(function (j) {
+        events = (j && j.ok && j.events) || [];
+        render();
+        return reconcile();
+      }).catch(function () {});
+    }
+  });
+}
+setInterval(pollDataPulse, 30000);
+document.addEventListener('visibilitychange', function () { if (!document.hidden) pollDataPulse(); });
+
 /* ── Stale-view guard: reload when a new version ships. No key needed — the
       page polls its OWN version.js, which every deploy bumps. ───────────── */
 (function () {
