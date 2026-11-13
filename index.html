@@ -215,8 +215,8 @@ html,body{margin:0;padding:0;width:100%;background:var(--bg);color:var(--text);
       <button class="spm-btn spm-btn-primary" id="dlg-go">Register</button>
       <button class="spm-btn spm-btn-secondary" id="dlg-close">Close</button>
     </div>
-    <p class="note">You can cancel any time — from this device, or from the link in your
-      confirmation email.</p>
+    <p class="note">You can cancel any time on this device. On a different phone or
+      computer, just reply to your confirmation email and we will take you off.</p>
   </div>
 </div>
 
@@ -485,8 +485,10 @@ function doCancel(eventId) {
     .catch(function () { alert('Could not reach the server. Please try again.'); });
 }
 
-/* Cancel link arriving from the confirmation email — works on any device,
-   including one that never registered. This is the real recall path. */
+/* LEGACY. Confirmation emails no longer carry a one-click cancel link —
+   operator ruling 2026-11-12, because cancelling from a device that did not
+   register left the registering device still showing "You are in". This
+   handler stays only so the handful of links already in inboxes still work. */
 function cancelFromLink() {
   var t = new URLSearchParams(location.search).get('cancel');
   if (!t) return Promise.resolve();
@@ -503,6 +505,34 @@ function cancelFromLink() {
   }).catch(function () {});
 }
 
+/* ── Reconcile what this device remembers against what the server says ──
+   localStorage is this device's private note, and it goes stale the moment
+   anything changes elsewhere — most often because the league office removed
+   someone from the admin page. Rendering "You are in" from an unchecked note
+   is a confident wrong answer, and the player turns up expecting a spot.
+   So the note is a FAST FIRST PAINT only; this corrects it a moment later.
+   Token-scoped, so it asks nothing the device could not already do. */
+function reconcile() {
+  var toks = [], keyFor = {};
+  for (var k in regs) { if (regs[k]) { toks.push(regs[k]); keyFor[regs[k]] = k; } }
+  if (!toks.length) return Promise.resolve();
+
+  return post({ action: 'sq_status', tokens: toks }).then(function (j) {
+    if (!j || !j.ok || !j.status) return;          // unreachable: keep what we have
+    var changed = false;
+    for (var t in j.status) {
+      var s = j.status[t];
+      var stillIn = s && s.status === 'registered';
+      /* Only ever REMOVE on a definite answer. A token the server said nothing
+         about is left alone — "could not check" must not look like "cancelled". */
+      if (!stillIn && (s === 'gone' || s === 'invalid' || (s && s.status))) {
+        if (keyFor[t] && regs[keyFor[t]]) { delete regs[keyFor[t]]; changed = true; }
+      }
+    }
+    if (changed) { lsSet('spm-sq-regs', regs); render(); }
+  }).catch(function () { /* offline: the cached view is better than none */ });
+}
+
 /* ── Boot ──────────────────────────────────────────────────────────────── */
 cancelFromLink().then(function () {
   return post({ action: 'sq_events' });
@@ -516,6 +546,7 @@ cancelFromLink().then(function () {
   for (var k in regs) if (!live[k]) { delete regs[k]; changed = true; }
   if (changed) lsSet('spm-sq-regs', regs);
   render();
+  return reconcile();          // then correct it against the server
 }).catch(function () {
   document.getElementById('list').innerHTML =
     '<div class="spm-card state">Could not load the qualifier list. Please refresh.</div>';

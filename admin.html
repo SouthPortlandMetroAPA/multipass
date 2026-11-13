@@ -547,7 +547,8 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
               (r.paid ? '<span class="pill p-ok">paid ' + esc(r.paid_amount != null ? money(r.paid_amount) : '') +
                         (r.payment_method ? ' · ' + esc(r.payment_method) : '') + '</span>'
                       : '<span class="pill p-warn">unpaid</span>') +
-              (el === 'ok' ? '<span class="pill p-info">eligible</span>' : (el ? '<span class="pill p-mute">' + esc(el) + '</span>' : '')) +
+              (el === 'eligible' ? '<span class="pill p-info">eligible</span>'
+                : el === 'ineligible' ? '<span class="pill p-bad">ineligible</span>' : '') +
               (q ? '<span class="pill p-ok">qualified</span>' : '') +
               (r.source === 'admin' ? '<span class="pill p-mute">added by you</span>' : '') +
             '</div>' +
@@ -561,7 +562,8 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
               '<button class="spm-btn spm-btn-secondary spm-btn-sm" data-act="pay" data-id="' + r.id + '">' +
                 (r.paid ? 'Payment' : 'Mark paid') + '</button>' +
               '<button class="spm-btn spm-btn-secondary spm-btn-sm" data-act="elig" data-id="' + r.id + '">' +
-                (el === 'ok' ? 'Un-tick eligible' : 'Tick eligible') + '</button>' +
+                (el === 'eligible' ? 'Mark ineligible' : el === 'ineligible' ? 'Clear eligibility' : 'Mark eligible') +
+              '</button>' +
               '<button class="spm-btn spm-btn-secondary spm-btn-sm" data-act="qual" data-id="' + r.id + '">' +
                 (q ? 'Un-qualify' : 'Mark qualified') + '</button>' +
               '<button class="spm-btn spm-btn-danger spm-btn-sm" data-act="cancel" data-id="' + r.id + '">Remove</button>' +
@@ -592,9 +594,14 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
     } else if (what === 'restore') {
       call = { action: 'sqa_reg_set', id: id, field: 'status', value: 'registered' };
     } else if (what === 'elig') {
+      /* eligibility_state_check allows ONLY 'eligible' / 'ineligible', and the
+         column is NOT NULL — "undecided" is the absence of a row. So the button
+         cycles unset → eligible → ineligible → unset. */
+      var now = eligState(r.member_number);
+      var next = now === 'eligible' ? 'ineligible' : now === 'ineligible' ? '' : 'eligible';
       call = { action: 'sqa_eligible', member_number: r.member_number,
                format: ev && ev.format, regionals_season: (ev && ev.regionals_season) || '',
-               state: eligState(r.member_number) === 'ok' ? '' : 'ok' };
+               state: next };
     } else if (what === 'qual') {
       var on = !isQualified(r.member_number);
       confirmText = on
