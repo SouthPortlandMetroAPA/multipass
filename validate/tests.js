@@ -21,8 +21,9 @@
  *
  * EMAIL COST
  *   Rings 3 and 5 write real rows. By default they pass dry_run, so the row is
- *   written and the token minted but nothing is mailed — the shared Gmail quota
- *   is ~100/day across every app. Turn off "Dry run" to prove real delivery.
+ *   written and the token minted but nothing is mailed. Not a quota worry (the
+ *   account sends ~1,500/day), just a reason not to spray bounces at a reserved
+ *   domain on every run. Turn off "Dry run" to prove real delivery.
  *
  * TEST DATA
  *   Member numbers are synthetic, in 99900000–99900999, and every registration
