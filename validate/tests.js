@@ -434,7 +434,21 @@ window.SQ_SUITE = (function () {
           }
         },
         {
-          id: '4.7', name: 'MUTATION — the suite can actually fail',
+          id: '4.7', name: 'sq_status is not a membership oracle',
+          why: 'It must answer only for HMAC tokens the caller already holds. A forged token has to come back "invalid" — never a row, and never a hint that an id exists.',
+          run: function () {
+            return post({ action: 'sq_status', tokens: ['1.AAAAAAAAAAAAAAAAAAAAAAAA', '2.BBBBBBBBBBBBBBBBBBBBBBBB'] })
+              .then(function (j) {
+                var s = (j && j.status) || {};
+                var leaked = Object.keys(s).filter(function (k) { return s[k] !== 'invalid'; });
+                return { ok: !!(j && j.ok) && !leaked.length,
+                         detail: leaked.length ? 'LEAKED for forged tokens: ' + JSON.stringify(s)
+                                               : 'both forged tokens reported "invalid"' };
+              });
+          }
+        },
+        {
+          id: '4.8', name: 'MUTATION — the suite can actually fail',
           why: 'A suite that cannot go red proves nothing. This asserts something known to be false; it must FAIL. If it passes, the runner is broken.',
           inverted: true,
           run: function () { return { ok: false, detail: 'deliberately false — the runner should show this as the expected red' }; }
@@ -522,7 +536,28 @@ window.SQ_SUITE = (function () {
           }
         },
         {
-          id: '5.6', name: 'Cleanup — cancel everything this ring created',
+          id: '5.6', name: 'A device’s remembered registration is corrected by the server',
+          why: 'THE STALENESS BUG. localStorage is the only record a phone keeps. When the office removes someone from the admin page, that phone kept rendering "You are in" — a confident wrong answer that puts them at the venue expecting a spot. sq_status is how the page corrects itself.',
+          run: function (ctx) {
+            var m = freshMember();
+            return post(baseReg(ctx, { member_number: m })).then(function (reg) {
+              if (!reg || !reg.token) return { ok: false, detail: 'could not register a probe to check' };
+              return post({ action: 'sq_status', tokens: [reg.token] }).then(function (a) {
+                var inNow = a && a.status && a.status[reg.token] && a.status[reg.token].status === 'registered';
+                return post({ action: 'sq_cancel', token: reg.token, dry_run: ctx.dryRun ? 1 : 0 })
+                  .then(function () { return post({ action: 'sq_status', tokens: [reg.token] }); })
+                  .then(function (b) {
+                    var outNow = b && b.status && b.status[reg.token] && b.status[reg.token].status === 'cancelled';
+                    return { ok: !!(inNow && outNow),
+                             detail: 'while registered: ' + JSON.stringify(a.status[reg.token]) +
+                                     '  |  after cancelling: ' + JSON.stringify(b.status[reg.token]) };
+                  });
+              });
+            });
+          }
+        },
+        {
+          id: '5.7', name: 'Cleanup — cancel everything this ring created',
           why: 'Same rule as 3.6. The operator’s list must contain only real players.',
           run: function (ctx) {
             var toks = (ctx.cleanup || []).filter(Boolean);
