@@ -560,17 +560,38 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
 
   function paintBlastPickers() {
     var ev = $('bl-ev'), keepEv = ev.value, h = '', i;
-    for (i = 0; i < D.events.length; i++) {
-      var e = D.events[i];
-      h += '<option value="' + e.id + '">' + esc(e.title || ('Qualifier ' + e.id)) +
-           (e.enabled ? '' : '  (archived)') + '</option>';
+
+    /* SOONEST FIRST. sqa_data returns newest-first, which is right for a
+       history list and wrong for "which one am I about to email". */
+    var list = D.events.slice().sort(function (a, b) {
+      return String(a.starts_at || '').localeCompare(String(b.starts_at || ''));
+    });
+    for (i = 0; i < list.length; i++) {
+      var e = list[i];
+      /* Same label as the first tab's selector, deliberately. e.title is
+         "8 Ball Play Til You Win Singles Qualifiers" for EVERY event, so a
+         picker built from titles showed six identical lines and the operator
+         would have been choosing blind. The date is the only thing that
+         tells them apart. */
+      h += '<option value="' + e.id + '">' +
+           esc((e.format === '9' ? '9 Ball' : '8 Ball') + ' · ' + fmtDT(e.starts_at) +
+               (e.enabled ? '' : '  (archived)') + (e.is_test ? '  (test)' : '')) +
+           '</option>';
     }
     ev.innerHTML = h;
-    /* Default to the qualifier the operator is already looking at, so the tab
-       opens on the obvious one; otherwise the first in the list. */
+
+    /* Default, in order of usefulness: whatever was already chosen here, then
+       the qualifier the operator is looking at on the first tab, then the
+       NEXT one that has not happened yet. */
+    var now = Date.now();
+    var upcoming = null;
+    for (i = 0; i < list.length; i++) {
+      if (list[i].enabled && new Date(list[i].starts_at).getTime() >= now) { upcoming = list[i]; break; }
+    }
     if (keepEv && ev.querySelector('option[value="' + keepEv + '"]')) ev.value = keepEv;
     else if (D.eventId) ev.value = String(D.eventId);
-    if (!ev.value && D.events.length) ev.value = String(D.events[0].id);
+    if (!ev.value && upcoming) ev.value = String(upcoming.id);
+    if (!ev.value && list.length) ev.value = String(list[list.length - 1].id);
 
     var aud = $('bl-aud');
     if (!aud.options.length) {
