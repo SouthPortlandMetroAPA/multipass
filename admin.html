@@ -229,14 +229,17 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
       <section id="tab-blast" class="hide">
         <div class="spm-card">
           <p style="margin:0 0 12px">
-            Goes to the group you pick below, for the qualifier selected on the
-            first tab. Addresses are BCC'd, never To.
+            Pick the qualifier and who gets it. Addresses are BCC'd, never To.
           </p>
+          <div class="row"><div>
+            <label class="fl" for="bl-ev">Qualifier</label>
+            <select class="fi" id="bl-ev"></select>
+          </div></div>
           <div class="row"><div>
             <label class="fl" for="bl-aud">Who gets this</label>
             <select class="fi" id="bl-aud"></select>
-            <p class="note" id="bl-aud-note" style="margin-top:6px"></p>
           </div></div>
+          <p class="note" id="bl-count" style="margin:0 0 12px"></p>
           <div class="row"><div>
             <label class="fl" for="bl-sub">Subject</label>
             <input class="fi" id="bl-sub" maxlength="150">
@@ -482,7 +485,7 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
       paintEventSelect();
       paintRegs();
       paintEvents();
-      paintAudiences();   /* the blast dropdown's counts follow the loaded data */
+      paintBlastPickers();   /* the blast tab picks its own qualifier */
       say('msg', '', '');
     }).catch(function () { say('msg', 'bad', 'Could not reach the server.'); });
   }
@@ -535,15 +538,16 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
   }
 
   /* ── Who a blast goes to ───────────────────────────────────────────────
-     This MIRRORS sqaResolveAudience_ in Code.gs, deliberately duplicated so
-     the dropdown can show a count without a round trip. It is a HINT ONLY:
-     the server re-resolves the group at send time and the confirm box shows
-     the SERVER's number, because this page may be holding data it loaded
-     ten minutes ago. If the two numbers ever disagree the server wins, and
-     the operator sees the server's.
-     "Qualified here" is matched on EVENT ID on both sides, not on
-     format+season, so it means this qualifier rather than any qualifier of
-     the same format. */
+     The Email tab picks its OWN qualifier. It used to inherit whichever one
+     was chosen on the first tab, so changing who got the mail meant leaving
+     the page you were on.
+
+     There is deliberately NO count computed here. An earlier version counted
+     each group from D.regs, which only ever holds the qualifier currently
+     loaded on the first tab - so every OTHER qualifier in this dropdown would
+     have read "(0)", confidently and wrongly. Instead the server is asked,
+     with a dry run, every time either dropdown changes: one live number
+     rather than seven stale ones. A dry run sends nothing and costs nothing. */
   var BLAST_AUDIENCES = [
     ['registered',   'Everyone still registered'],
     ['unpaid',       'Registered, not paid'],
@@ -553,51 +557,55 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
     ['qualified',    'Qualified at this one'],
     ['cancelled',    'People who cancelled']
   ];
-  function inAudience(r, key) {
-    if (!r.email) return false;
-    var isReg = r.status === 'registered';
-    if (key === 'registered')   return isReg;
-    if (key === 'unpaid')       return isReg && !r.paid;
-    if (key === 'paid')         return isReg && !!r.paid;
-    if (key === 'eligible')     return isReg && eligState(r) === 'eligible';
-    if (key === 'not_eligible') return isReg && eligState(r) !== 'eligible';
-    if (key === 'cancelled')    return r.status === 'cancelled';
-    if (key === 'qualified') {
-      for (var i = 0; i < D.qual.length; i++) {
-        if (D.qual[i].event_id === r.event_id &&
-            D.qual[i].member_number === r.member_number) return true;
+
+  function paintBlastPickers() {
+    var ev = $('bl-ev'), keepEv = ev.value, h = '', i;
+    for (i = 0; i < D.events.length; i++) {
+      var e = D.events[i];
+      h += '<option value="' + e.id + '">' + esc(e.title || ('Qualifier ' + e.id)) +
+           (e.enabled ? '' : '  (archived)') + '</option>';
+    }
+    ev.innerHTML = h;
+    /* Default to the qualifier the operator is already looking at, so the tab
+       opens on the obvious one; otherwise the first in the list. */
+    if (keepEv && ev.querySelector('option[value="' + keepEv + '"]')) ev.value = keepEv;
+    else if (D.eventId) ev.value = String(D.eventId);
+    if (!ev.value && D.events.length) ev.value = String(D.events[0].id);
+
+    var aud = $('bl-aud');
+    if (!aud.options.length) {
+      var ha = '';
+      for (i = 0; i < BLAST_AUDIENCES.length; i++) {
+        ha += '<option value="' + BLAST_AUDIENCES[i][0] + '">' + BLAST_AUDIENCES[i][1] + '</option>';
       }
+      aud.innerHTML = ha;
+      aud.value = 'registered';
     }
-    return false;
+    refreshBlastCount();
   }
-  function audienceCount(key) {
-    /* One address once, same as the server: a player who cancelled and
-       re-registered has two rows and must not be counted, or mailed, twice. */
-    var seen = {}, n = 0, i;
-    for (i = 0; i < D.regs.length; i++) {
-      var r = D.regs[i];
-      if (r.event_id !== D.eventId) continue;
-      if (!inAudience(r, key)) continue;
-      var a = String(r.email).trim().toLowerCase();
-      if (seen[a]) continue;
-      seen[a] = true; n++;
-    }
-    return n;
-  }
-  function paintAudiences() {
-    var sel = $('bl-aud'), keep = sel.value || 'registered', h = '';
-    for (var i = 0; i < BLAST_AUDIENCES.length; i++) {
-      var k = BLAST_AUDIENCES[i][0];
-      var n = D.eventId ? audienceCount(k) : 0;
-      h += '<option value="' + k + '">' + BLAST_AUDIENCES[i][1] +
-           (D.eventId ? ' (' + n + ')' : '') + '</option>';
-    }
-    sel.innerHTML = h;
-    sel.value = keep;
-    if (!sel.value) sel.value = 'registered';
-    $('bl-aud-note').textContent = D.eventId
-      ? 'Counts are from the last load of this page. The server checks again before anything is sent.'
-      : 'Pick a single qualifier on the first tab first. A blast goes to one qualifier.';
+
+  /* One in-flight count at a time: a fast operator changing both dropdowns
+     could otherwise have an older answer land last and show the wrong number
+     for the current pair. */
+  var blastCountToken = 0;
+  function refreshBlastCount() {
+    var eid = parseInt($('bl-ev').value, 10) || 0;
+    var aud = $('bl-aud').value || 'registered';
+    if (!eid) { $('bl-count').textContent = 'No qualifiers to send to.'; return; }
+    var mine = ++blastCountToken;
+    $('bl-count').textContent = 'Counting\u2026';
+    post({ action: 'sqa_email_all', event_id: eid, audience: aud, dry_run: true })
+      .then(function (j) {
+        if (mine !== blastCountToken) return;            /* a newer answer won */
+        if (!j || !j.ok) { $('bl-count').textContent = (j && j.error) || 'Could not count that group.'; return; }
+        $('bl-count').textContent = j.recipients === 0
+          ? 'Nobody in that group has an email address.'
+          : 'This will go to ' + j.recipients + ' ' + (j.recipients === 1 ? 'person' : 'people') +
+            ' \u2014 ' + j.audience_label + '.';
+      })['catch'](function () {
+        if (mine !== blastCountToken) return;
+        $('bl-count').textContent = 'Could not reach the server to count that group.';
+      });
   }
 
   function paintRegs() {
@@ -877,26 +885,24 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
   });
 
   // ── Blast ───────────────────────────────────────────────────────────────
-  $('bl-aud').addEventListener('change', function () {
-    $('bl-aud-note').textContent =
-      'Counts are from the last load of this page. The server checks again before anything is sent.';
-  });
+  $('bl-ev').addEventListener('change', refreshBlastCount);
+  $('bl-aud').addEventListener('change', refreshBlastCount);
 
   /* Two steps on purpose. The dry run asks the SERVER who is in the group and
      sends nothing, so the number in the confirm box is the list that will
      actually be mailed rather than a count this page worked out from data it
      may not have reloaded. A dry run costs no mail and no daily allowance. */
   $('btn-blast').addEventListener('click', function () {
-    if (!D.eventId) { say('msg', 'bad', 'Pick a single qualifier on the first tab. A blast goes to one qualifier.'); return; }
+    var eid = parseInt($('bl-ev').value, 10) || 0;
+    if (!eid) { say('msg', 'bad', 'There is no qualifier to send to.'); return; }
     if (!$('bl-sub').value.trim() || !$('bl-msg').value.trim()) {
       say('msg', 'bad', 'Subject and message are both required.'); return;
     }
-    var ev = currentEvent();
     var aud = $('bl-aud').value || 'registered';
     var b = $('btn-blast');
     b.disabled = true; b.textContent = 'Checking\u2026';
 
-    post({ action: 'sqa_email_all', event_id: D.eventId, audience: aud, dry_run: true })
+    post({ action: 'sqa_email_all', event_id: eid, audience: aud, dry_run: true })
       .then(function (d) {
         b.disabled = false; b.textContent = 'Send';
         if (!guard(d)) return;
@@ -905,12 +911,12 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
 
         if (!confirm('Send to ' + d.recipients + ' recipient' + (d.recipients === 1 ? '' : 's') +
                      '\n\nGroup: ' + d.audience_label +
-                     '\nQualifier: ' + (d.event_title || (ev && ev.title) || '') +
+                     '\nQualifier: ' + (d.event_title || $('bl-ev').selectedOptions[0].text) +
                      '\nSubject: ' + $('bl-sub').value.trim() +
                      '\n\nThis cannot be unsent.')) return;
 
         b.disabled = true; b.textContent = 'Sending\u2026';
-        post({ action: 'sqa_email_all', event_id: D.eventId, audience: aud,
+        post({ action: 'sqa_email_all', event_id: eid, audience: aud,
                subject: $('bl-sub').value, message: $('bl-msg').value })
           .then(function (j) {
             b.disabled = false; b.textContent = 'Send';
