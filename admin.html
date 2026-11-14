@@ -229,9 +229,14 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
       <section id="tab-blast" class="hide">
         <div class="spm-card">
           <p style="margin:0 0 12px">
-            Goes to everyone still <strong>registered</strong> for the qualifier selected on the
+            Goes to the group you pick below, for the qualifier selected on the
             first tab. Addresses are BCC'd, never To.
           </p>
+          <div class="row"><div>
+            <label class="fl" for="bl-aud">Who gets this</label>
+            <select class="fi" id="bl-aud"></select>
+            <p class="note" id="bl-aud-note" style="margin-top:6px"></p>
+          </div></div>
           <div class="row"><div>
             <label class="fl" for="bl-sub">Subject</label>
             <input class="fi" id="bl-sub" maxlength="150">
@@ -240,11 +245,12 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
             <label class="fl" for="bl-msg">Message</label>
             <textarea class="fi" id="bl-msg" maxlength="4000"></textarea>
           </div></div>
-          <button class="spm-btn spm-btn-primary" id="btn-blast">Send to registrants</button>
+          <button class="spm-btn spm-btn-primary" id="btn-blast">Send</button>
           <p class="note">
-            Capped at 250 recipients and 4 blasts a day. That is well above any qualifier
-            roster, so the cap only ever catches a mistake. The account sends about 1,500 a
-            day across every app, which this will not come close to.
+            The count in the confirm box comes from the server, not from this page, so it is
+            the list that will actually be mailed. Capped at 250 recipients and 4 blasts a
+            day; checking the count costs neither. The account sends about 1,500 a day across
+            every app, which this will not come close to.
           </p>
         </div>
       </section>
@@ -476,6 +482,7 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
       paintEventSelect();
       paintRegs();
       paintEvents();
+      paintAudiences();   /* the blast dropdown's counts follow the loaded data */
       say('msg', '', '');
     }).catch(function () { say('msg', 'bad', 'Could not reach the server.'); });
   }
@@ -525,6 +532,72 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
   function isQualified(r) {
     for (var i = 0; i < D.qual.length; i++) if (matches(D.qual[i], r)) return true;
     return false;
+  }
+
+  /* ── Who a blast goes to ───────────────────────────────────────────────
+     This MIRRORS sqaResolveAudience_ in Code.gs, deliberately duplicated so
+     the dropdown can show a count without a round trip. It is a HINT ONLY:
+     the server re-resolves the group at send time and the confirm box shows
+     the SERVER's number, because this page may be holding data it loaded
+     ten minutes ago. If the two numbers ever disagree the server wins, and
+     the operator sees the server's.
+     "Qualified here" is matched on EVENT ID on both sides, not on
+     format+season, so it means this qualifier rather than any qualifier of
+     the same format. */
+  var BLAST_AUDIENCES = [
+    ['registered',   'Everyone still registered'],
+    ['unpaid',       'Registered, not paid'],
+    ['paid',         'Registered and paid'],
+    ['eligible',     'Marked eligible'],
+    ['not_eligible', 'Not marked eligible yet'],
+    ['qualified',    'Qualified at this one'],
+    ['cancelled',    'People who cancelled']
+  ];
+  function inAudience(r, key) {
+    if (!r.email) return false;
+    var isReg = r.status === 'registered';
+    if (key === 'registered')   return isReg;
+    if (key === 'unpaid')       return isReg && !r.paid;
+    if (key === 'paid')         return isReg && !!r.paid;
+    if (key === 'eligible')     return isReg && eligState(r) === 'eligible';
+    if (key === 'not_eligible') return isReg && eligState(r) !== 'eligible';
+    if (key === 'cancelled')    return r.status === 'cancelled';
+    if (key === 'qualified') {
+      for (var i = 0; i < D.qual.length; i++) {
+        if (D.qual[i].event_id === r.event_id &&
+            D.qual[i].member_number === r.member_number) return true;
+      }
+    }
+    return false;
+  }
+  function audienceCount(key) {
+    /* One address once, same as the server: a player who cancelled and
+       re-registered has two rows and must not be counted, or mailed, twice. */
+    var seen = {}, n = 0, i;
+    for (i = 0; i < D.regs.length; i++) {
+      var r = D.regs[i];
+      if (r.event_id !== D.eventId) continue;
+      if (!inAudience(r, key)) continue;
+      var a = String(r.email).trim().toLowerCase();
+      if (seen[a]) continue;
+      seen[a] = true; n++;
+    }
+    return n;
+  }
+  function paintAudiences() {
+    var sel = $('bl-aud'), keep = sel.value || 'registered', h = '';
+    for (var i = 0; i < BLAST_AUDIENCES.length; i++) {
+      var k = BLAST_AUDIENCES[i][0];
+      var n = D.eventId ? audienceCount(k) : 0;
+      h += '<option value="' + k + '">' + BLAST_AUDIENCES[i][1] +
+           (D.eventId ? ' (' + n + ')' : '') + '</option>';
+    }
+    sel.innerHTML = h;
+    sel.value = keep;
+    if (!sel.value) sel.value = 'registered';
+    $('bl-aud-note').textContent = D.eventId
+      ? 'Counts are from the last load of this page. The server checks again before anything is sent.'
+      : 'Pick a single qualifier on the first tab first. A blast goes to one qualifier.';
   }
 
   function paintRegs() {
@@ -804,21 +877,59 @@ input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(-
   });
 
   // ── Blast ───────────────────────────────────────────────────────────────
+  $('bl-aud').addEventListener('change', function () {
+    $('bl-aud-note').textContent =
+      'Counts are from the last load of this page. The server checks again before anything is sent.';
+  });
+
+  /* Two steps on purpose. The dry run asks the SERVER who is in the group and
+     sends nothing, so the number in the confirm box is the list that will
+     actually be mailed rather than a count this page worked out from data it
+     may not have reloaded. A dry run costs no mail and no daily allowance. */
   $('btn-blast').addEventListener('click', function () {
-    if (!D.eventId) { say('msg', 'bad', 'Pick a single qualifier on the first tab. A blast goes to one qualifier\u2019s registrants.'); return; }
+    if (!D.eventId) { say('msg', 'bad', 'Pick a single qualifier on the first tab. A blast goes to one qualifier.'); return; }
+    if (!$('bl-sub').value.trim() || !$('bl-msg').value.trim()) {
+      say('msg', 'bad', 'Subject and message are both required.'); return;
+    }
     var ev = currentEvent();
-    var n = D.regs.filter(function (r) { return r.status === 'registered' && r.email; }).length;
-    if (!n) { say('msg', 'bad', 'Nobody registered for this qualifier has an email address.'); return; }
-    if (!confirm('Send to ' + n + ' registrant' + (n === 1 ? '' : 's') + ' of "' + ((ev && ev.title) || '') + '"?')) return;
-    var b = $('btn-blast'); b.disabled = true; b.textContent = 'Sending…';
-    post({ action: 'sqa_email_all', event_id: D.eventId, subject: $('bl-sub').value, message: $('bl-msg').value })
-      .then(function (j) {
-        b.disabled = false; b.textContent = 'Send to registrants';
-        if (!guard(j)) return;
-        if (j && j.ok) { say('msg', 'ok', 'Sent to ' + j.sent + ' recipient' + (j.sent === 1 ? '' : 's') + '.');
-                         $('bl-sub').value = ''; $('bl-msg').value = ''; }
-        else say('msg', 'bad', (j && j.error) || 'Could not send.');
-      }).catch(function () { b.disabled = false; b.textContent = 'Send to registrants'; say('msg', 'bad', 'Could not reach the server.'); });
+    var aud = $('bl-aud').value || 'registered';
+    var b = $('btn-blast');
+    b.disabled = true; b.textContent = 'Checking\u2026';
+
+    post({ action: 'sqa_email_all', event_id: D.eventId, audience: aud, dry_run: true })
+      .then(function (d) {
+        b.disabled = false; b.textContent = 'Send';
+        if (!guard(d)) return;
+        if (!d || !d.ok) { say('msg', 'bad', (d && d.error) || 'Could not check that group.'); return; }
+        if (!d.recipients) { say('msg', 'bad', 'Nobody in that group has an email address: ' + d.audience_label + '.'); return; }
+
+        if (!confirm('Send to ' + d.recipients + ' recipient' + (d.recipients === 1 ? '' : 's') +
+                     '\n\nGroup: ' + d.audience_label +
+                     '\nQualifier: ' + (d.event_title || (ev && ev.title) || '') +
+                     '\nSubject: ' + $('bl-sub').value.trim() +
+                     '\n\nThis cannot be unsent.')) return;
+
+        b.disabled = true; b.textContent = 'Sending\u2026';
+        post({ action: 'sqa_email_all', event_id: D.eventId, audience: aud,
+               subject: $('bl-sub').value, message: $('bl-msg').value })
+          .then(function (j) {
+            b.disabled = false; b.textContent = 'Send';
+            if (!guard(j)) return;
+            if (j && j.ok) {
+              say('msg', 'ok', 'Sent to ' + j.sent + ' recipient' + (j.sent === 1 ? '' : 's') +
+                               ' (' + j.audience_label + ').');
+              $('bl-sub').value = ''; $('bl-msg').value = '';
+            } else say('msg', 'bad', (j && j.error) || 'Could not send.');
+          })['catch'](function () {
+            b.disabled = false; b.textContent = 'Send';
+            /* The send may or may not have gone out. Say so, rather than
+               inviting a second blast to the same people. */
+            say('msg', 'bad', 'Lost the connection while sending. Check the inbox copy before trying again.');
+          });
+      })['catch'](function () {
+        b.disabled = false; b.textContent = 'Send';
+        say('msg', 'bad', 'Could not reach the server.');
+      });
   });
 
   // ── CSV ─────────────────────────────────────────────────────────────────
